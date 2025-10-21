@@ -1,0 +1,15 @@
+General Plan 
+1. Define a Linked List Abstract Factory for our nodes of computation 
+2. The abstract factory should have abstract methods: 
+   - forward(input), backward(gradient)
+   - fields: next, prev
+3. Need to have the following concrete implementations for the abstract factory 
+   - loss
+   - sigmoid
+   - ReLU
+   - layer_linear
+   - layer_matrix 
+      - need to see how to implement gradients for this one 
+
+I think we shoud just start simple and get something simple to work 
+and then later try to implement this abstract factory 
