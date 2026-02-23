@@ -3,10 +3,17 @@ MLP built from node classes. Each node tracks inputs, has a forward equation,
 and a layer-specific backprop. Uses an abstract base class with concrete
 implementations: LinearLayer, activations, and Loss.
 """
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.datasets import make_moons, make_circles
 from abc import ABC, abstractmethod
+from datetime import datetime
+import petname
+
+# Run identifier for saved plots: [timestamp]_[RUN_NAME]_[plot_type].png
+RUN_NAME = petname.Generate(2, "_")  # e.g. wiggly_yellowtail
+OUTPUT_DIR = "outputs"
 
 # -----------------------------------------------------------------------------
 # Abstract base: all nodes track inputs and define forward + backward
@@ -213,10 +220,9 @@ def build_dataset():
 
     return X_train, y_train, X_test, y_test
 
-def plot_dataset(X_train, y_train, X_test, y_test):
+def plot_dataset(X_train, y_train, X_test, y_test, save_path=None):
     """Plots the training and test splits of the dataset."""
 
-    # Plot
     plt.figure(figsize=(6, 6))
     plt.scatter(X_train[:, 0], X_train[:, 1], c=y_train.ravel(), cmap='bwr', edgecolor='k', marker='o', label='Train')
     plt.scatter(X_test[:, 0], X_test[:, 1], c=y_test.ravel(), cmap='cool', edgecolor='k', marker='s', alpha=0.6, label='Test')
@@ -225,6 +231,8 @@ def plot_dataset(X_train, y_train, X_test, y_test):
     plt.ylabel('x2')
     plt.legend()
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.show()
 
 def mean_loss(X, y, nodes):
@@ -247,7 +255,15 @@ def main():
     np.random.seed(42)
 
     X_train, y_train, X_test, y_test = build_dataset()
-    plot_dataset(X_train, y_train, X_test, y_test)
+
+    # One timestamp and output dir per run; plots saved as [month_day_year_hr_min_sec]_[RUN_NAME]_[type].png
+    run_ts = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    def plot_path(plot_type: str) -> str:
+        return os.path.join(OUTPUT_DIR, f"{run_ts}_{RUN_NAME}_{plot_type}.png")
+
+    plot_dataset(X_train, y_train, X_test, y_test, save_path=plot_path("dataset"))
     n_train = len(X_train)
 
     # Build nodes (input dim 2, output dim 1 to match dataset)
@@ -348,6 +364,7 @@ def main():
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
+    plt.savefig(plot_path("train_validation_loss"), dpi=150, bbox_inches="tight")
     plt.show()
 
     # Plot 2: Final outcome — model predictions vs training set ground truth
@@ -362,6 +379,7 @@ def main():
     ax2.set_xlabel("x1")
     ax2.set_ylabel("x2")
     plt.tight_layout()
+    plt.savefig(plot_path("predictions"), dpi=150, bbox_inches="tight")
     plt.show()
     # -----------------------------------------------------------------------------
 
