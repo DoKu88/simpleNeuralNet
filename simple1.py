@@ -194,7 +194,7 @@ class SquaredLoss(LossNode):
 
 def build_dataset():
     # Option A — two interlocking half-circles (non-linear)
-    X, y = make_moons(n_samples=400, noise=0.15, random_state=42)
+    X, y = make_moons(n_samples=1000, noise=0.15, random_state=42)
     y = y.reshape(-1, 1)           # make it (N,1)
 
     # Option B — concentric circles (more non-linear)
@@ -224,6 +224,16 @@ def plot_dataset(X_train, y_train, X_test, y_test):
     plt.tight_layout()
     plt.show()
 
+def mean_loss(X, y, nodes):
+    """Mean loss over (X, y) using the given nodes. Last node must be a LossNode."""
+    layers, loss_node = nodes[:-1], nodes[-1]
+    total = 0.0
+    for i in range(len(X)):
+        h = X[i]
+        for node in layers:
+            h = node.forward(h)
+        total += loss_node.forward(h, np.ravel(y[i]))
+    return total / len(X)
 
 # -----------------------------------------------------------------------------
 # Example: linear -> ReLU -> linear -> squared loss
@@ -238,13 +248,20 @@ def main():
 
     # Build nodes (input dim 2, output dim 1 to match dataset)
     linear1 = LinearLayer(2, 4)
-    relu = ReLU()
-    linear2 = LinearLayer(4, 1)
+    relu1 = ReLU()
+    linear2 = LinearLayer(4, 4)
+    relu2 = ReLU()
+    linear3 = LinearLayer(4, 1)
     loss_fn = SquaredLoss()
+
+    nodes = [linear1, relu1, linear2, relu2, linear3, loss_fn]
+    layers, loss_node = nodes[:-1], nodes[-1]
 
     lr = 0.1
     num_iters = 200
     losses = []
+    val_steps = []
+    val_losses = []
 
     for step in range(num_iters):
         epoch_loss = 0.0
@@ -252,60 +269,83 @@ def main():
             x = X_train[i]
             y = np.ravel(y_train[i])
 
-            # Forward
-            h = linear1.forward(x)
-            h = relu.forward(h)
-            pred = linear2.forward(h)
-            loss = loss_fn.forward(pred, y)
+            # Forward through layers, then loss
+            h = x
+            for node in layers:
+                h = node.forward(h)
+            loss = loss_node.forward(h, y)
             epoch_loss += loss
 
-            # Backward (upstream = 1 for loss); y = prediction in loss L(target, y)
-            dL_dy = loss_fn.backward(1.0)
-            dL_dh = linear2.backward(dL_dy)
-            dL_dh = relu.backward(dL_dh)
-            linear1.backward(dL_dh)
+            # Backward (upstream = 1 for loss), then through layers in reverse
+            upstream = loss_node.backward(1.0)
+            for node in reversed(layers):
+                upstream = node.backward(upstream)
 
-            # Gradient descent (only linear layers have parameters)
-            linear2.update_weights(lr)
-            linear1.update_weights(lr)
+            # Gradient descent
+            for node in nodes:
+                node.update_weights(lr)
 
         losses.append(epoch_loss / n_train)
 
-    # Final forward (average loss on training set)
+        # Validation loss every 10 iterations
+        if step % 10 == 0:
+            val_loss = mean_loss(X_test, y_test, nodes)
+            val_steps.append(step)
+            val_losses.append(val_loss)
+
+    # Final forward (average loss on training set) and predictions using nodes
     total_loss = 0.0
+    train_preds = np.zeros(n_train)
     for i in range(n_train):
         x = X_train[i]
         y = np.ravel(y_train[i])
-        h = linear1.forward(x)
-        h = relu.forward(h)
-        pred = linear2.forward(h)
-        total_loss += loss_fn.forward(pred, y)
+        h = x
+        for node in layers:
+            h = node.forward(h)
+        train_preds[i] = float(h)
+        total_loss += loss_node.forward(h, y)
     avg_loss = total_loss / n_train
 
-    # Sample prediction for display
+    # Sample for display
     x0, y0 = X_train[0], np.ravel(y_train[0])
-    h = linear1.forward(x0)
-    h = relu.forward(h)
-    pred = linear2.forward(h)
+    h = x0
+    for node in layers:
+        h = node.forward(h)
+    pred = h
 
     print("=== After training (simple1 node-based MLP) ===")
     print("Equations:")
-    print(f"  Linear1: {linear1.equation}")
-    print(f"  ReLU:    {relu.equation}")
-    print(f"  Linear2: {linear2.equation}")
-    print(f"  Loss:    {loss_fn.equation}")
+    for node in nodes:
+        print(f"  {node.__class__.__name__}: {node.equation}")
     print(f"sample predicted: {pred}")
     print(f"sample ground truth: {y0}")
     print(f"mean train loss: {avg_loss:.6f}")
     print(f"inputs tracked by linear1: {len(linear1._inputs)} (one per forward)")
 
-    # Plot loss per iteration
+    # Plot 1: Train and validation loss (validation every 10 iters)
     plt.figure(figsize=(8, 5))
-    plt.plot(range(num_iters), losses)
+    plt.plot(range(num_iters), losses, label="Train loss")
+    plt.plot(val_steps, val_losses, "o-", label="Validation loss (every 10 iters)")
     plt.xlabel("Iteration")
     plt.ylabel("Loss")
-    plt.title("Loss vs iteration")
+    plt.title("Train and validation loss")
+    plt.legend()
     plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+    # Plot 2: Final outcome — model predictions vs training set ground truth
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    ax1.scatter(X_train[:, 0], X_train[:, 1], c=y_train.ravel(), cmap="bwr", edgecolor="k", s=30)
+    ax1.set_title("Ground truth (train)")
+    ax1.set_xlabel("x1")
+    ax1.set_ylabel("x2")
+
+    ax2.scatter(X_train[:, 0], X_train[:, 1], c=train_preds, cmap="bwr", edgecolor="k", s=30)
+    ax2.set_title("Model prediction (train)")
+    ax2.set_xlabel("x1")
+    ax2.set_ylabel("x2")
+    plt.tight_layout()
     plt.show()
 
 
