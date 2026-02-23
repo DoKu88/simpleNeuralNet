@@ -5,6 +5,7 @@ implementations: LinearLayer, activations, and Loss.
 """
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.datasets import make_moons, make_circles
 from abc import ABC, abstractmethod
 
 # -----------------------------------------------------------------------------
@@ -40,6 +41,38 @@ class Node(ABC):
         """Gradient descent step. No-op for nodes without parameters (e.g. activation, loss)."""
         pass
 
+# -----------------------------------------------------------------------------
+# Non-linear activations (abstract activation + concrete ReLU, Sigmoid)
+# -----------------------------------------------------------------------------
+
+class Activation(Node, ABC):
+    """Base for element-wise activation layers. Equation is subclass-specific."""
+
+    def __init__(self):
+        super().__init__()
+        self._last_output = None  # often needed for backward (e.g. sigmoid'(y)=y*(1-y))
+
+    @abstractmethod
+    def _f(self, x: np.ndarray) -> np.ndarray:
+        """Element-wise activation."""
+        pass
+
+    @abstractmethod
+    def _f_prime(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """Derivative w.r.t. input; may use stored output y = f(x)."""
+        pass
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        x = np.asarray(x, dtype=float)
+        self._record_input(x)
+        y = self._f(x)
+        self._last_output = y
+        return y
+
+    def backward(self, upstream: np.ndarray) -> np.ndarray:
+        x = self._inputs[-1]
+        y = self._last_output
+        return upstream * self._f_prime(x, y)
 
 # -----------------------------------------------------------------------------
 # Linear layer: y = Mx + b
@@ -84,41 +117,6 @@ class LinearLayer(Node):
         """Gradient descent step: W -= lr * dLdW, b -= lr * dLdb. Call after backward."""
         self.W -= lr * self.dLdW
         self.b -= lr * self.dLdb
-
-
-# -----------------------------------------------------------------------------
-# Non-linear activations (abstract activation + concrete ReLU, Sigmoid)
-# -----------------------------------------------------------------------------
-
-class Activation(Node, ABC):
-    """Base for element-wise activation layers. Equation is subclass-specific."""
-
-    def __init__(self):
-        super().__init__()
-        self._last_output = None  # often needed for backward (e.g. sigmoid'(y)=y*(1-y))
-
-    @abstractmethod
-    def _f(self, x: np.ndarray) -> np.ndarray:
-        """Element-wise activation."""
-        pass
-
-    @abstractmethod
-    def _f_prime(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Derivative w.r.t. input; may use stored output y = f(x)."""
-        pass
-
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        x = np.asarray(x, dtype=float)
-        self._record_input(x)
-        y = self._f(x)
-        self._last_output = y
-        return y
-
-    def backward(self, upstream: np.ndarray) -> np.ndarray:
-        x = self._inputs[-1]
-        y = self._last_output
-        return upstream * self._f_prime(x, y)
-
 
 class ReLU(Activation):
     """ReLU: y = max(0, x). Backprop: pass upstream where x > 0."""
@@ -194,6 +192,38 @@ class SquaredLoss(LossNode):
     def _loss_gradient(self, pred: np.ndarray, target: np.ndarray) -> np.ndarray:
         return -2.0 * (target - pred)
 
+def build_dataset():
+    # Option A — two interlocking half-circles (non-linear)
+    X, y = make_moons(n_samples=400, noise=0.15, random_state=42)
+    y = y.reshape(-1, 1)           # make it (N,1)
+
+    # Option B — concentric circles (more non-linear)
+    # X, y = make_circles(n_samples=400, noise=0.15, factor=0.4, random_state=42)
+    # y = y.reshape(-1, 1)
+
+    # Split
+    np.random.seed(0)
+    idx = np.random.permutation(len(X))
+    train_size = 320
+    X_train, y_train = X[idx[:train_size]], y[idx[:train_size]]
+    X_test,  y_test  = X[idx[train_size:]], y[idx[train_size:]]
+
+    return X_train, y_train, X_test, y_test
+
+def plot_dataset(X_train, y_train, X_test, y_test):
+    """Plots the training and test splits of the dataset."""
+
+    # Plot
+    plt.figure(figsize=(6, 6))
+    plt.scatter(X_train[:, 0], X_train[:, 1], c=y_train.ravel(), cmap='bwr', edgecolor='k', marker='o', label='Train')
+    plt.scatter(X_test[:, 0], X_test[:, 1], c=y_test.ravel(), cmap='cool', edgecolor='k', marker='s', alpha=0.6, label='Test')
+    plt.title('Dataset: training and test splits')
+    plt.xlabel('x1')
+    plt.ylabel('x2')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
 
 # -----------------------------------------------------------------------------
 # Example: linear -> ReLU -> linear -> squared loss
@@ -201,13 +231,15 @@ class SquaredLoss(LossNode):
 
 def main():
     np.random.seed(42)
-    x = np.array([0.5, 0.5, 0.5])
-    target = np.array([0.75, 0.10])
 
-    # Build nodes
-    linear1 = LinearLayer(3, 4)
+    X_train, y_train, X_test, y_test = build_dataset()
+    plot_dataset(X_train, y_train, X_test, y_test)
+    n_train = len(X_train)
+
+    # Build nodes (input dim 2, output dim 1 to match dataset)
+    linear1 = LinearLayer(2, 4)
     relu = ReLU()
-    linear2 = LinearLayer(4, 2)
+    linear2 = LinearLayer(4, 1)
     loss_fn = SquaredLoss()
 
     lr = 0.1
@@ -215,28 +247,46 @@ def main():
     losses = []
 
     for step in range(num_iters):
-        # Forward
+        epoch_loss = 0.0
+        for i in range(n_train):
+            x = X_train[i]
+            y = np.ravel(y_train[i])
+
+            # Forward
+            h = linear1.forward(x)
+            h = relu.forward(h)
+            pred = linear2.forward(h)
+            loss = loss_fn.forward(pred, y)
+            epoch_loss += loss
+
+            # Backward (upstream = 1 for loss); y = prediction in loss L(target, y)
+            dL_dy = loss_fn.backward(1.0)
+            dL_dh = linear2.backward(dL_dy)
+            dL_dh = relu.backward(dL_dh)
+            linear1.backward(dL_dh)
+
+            # Gradient descent (only linear layers have parameters)
+            linear2.update_weights(lr)
+            linear1.update_weights(lr)
+
+        losses.append(epoch_loss / n_train)
+
+    # Final forward (average loss on training set)
+    total_loss = 0.0
+    for i in range(n_train):
+        x = X_train[i]
+        y = np.ravel(y_train[i])
         h = linear1.forward(x)
         h = relu.forward(h)
         pred = linear2.forward(h)
-        loss = loss_fn.forward(pred, target)
-        losses.append(loss)
+        total_loss += loss_fn.forward(pred, y)
+    avg_loss = total_loss / n_train
 
-        # Backward (upstream = 1 for loss); y = prediction in loss L(target, y)
-        dL_dy = loss_fn.backward(1.0)
-        dL_dh = linear2.backward(dL_dy)
-        dL_dh = relu.backward(dL_dh)
-        linear1.backward(dL_dh)
-
-        # Gradient descent (only linear layers have parameters)
-        linear2.update_weights(lr)
-        linear1.update_weights(lr)
-
-    # Final forward
-    h = linear1.forward(x)
+    # Sample prediction for display
+    x0, y0 = X_train[0], np.ravel(y_train[0])
+    h = linear1.forward(x0)
     h = relu.forward(h)
     pred = linear2.forward(h)
-    loss = loss_fn.forward(pred, target)
 
     print("=== After training (simple1 node-based MLP) ===")
     print("Equations:")
@@ -244,9 +294,9 @@ def main():
     print(f"  ReLU:    {relu.equation}")
     print(f"  Linear2: {linear2.equation}")
     print(f"  Loss:    {loss_fn.equation}")
-    print(f"predicted:   {pred}")
-    print(f"ground truth: {target}")
-    print(f"final loss:  {loss}")
+    print(f"sample predicted: {pred}")
+    print(f"sample ground truth: {y0}")
+    print(f"mean train loss: {avg_loss:.6f}")
     print(f"inputs tracked by linear1: {len(linear1._inputs)} (one per forward)")
 
     # Plot loss per iteration
