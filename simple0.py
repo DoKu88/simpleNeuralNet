@@ -37,29 +37,43 @@ def backward_pass(ground_truth, y, x, m, bias):
 
 def main():
     # Simple network: y = m @ x + b
-    # In numpy it's (rows, columns)
     x = np.asarray([0.5, 0.5, 0.5])
     m = np.random.rand(2, 3)
     bias = np.random.rand(2)
     ground_truth = np.asarray([0.75, 0.10])
 
-    # Forward
+    num_iters = 100
+    learning_rate = 0.1
+    losses = []
+
+    for i in range(num_iters):
+        # Forward
+        y, diff, loss = forward_pass(x, m, bias, ground_truth)
+        losses.append(loss)
+
+        # Backward
+        dLdy, dydm, dydb, dLdm, dLdb = backward_pass(ground_truth, y, x, m, bias)
+
+        # Gradient descent update
+        m = m - learning_rate * dLdm
+        bias = bias - learning_rate * dLdb
+
+    # Final forward pass for printing
     y, diff, loss = forward_pass(x, m, bias, ground_truth)
-    print("===Forward Pass===")
+    print("===After training===")
     print(f"predicted: {y}")
     print(f"ground truth: {ground_truth}")
     print(f"difference {diff}")
-    print(f"loss: {loss}")
-    print("\n")
+    print(f"final loss: {loss}")
 
-    # Backward
-    dLdy, dydm, dydb, dLdm, dLdb = backward_pass(ground_truth, y, x, m, bias)
-    print("===Gradients===")
-    print(f"dL/dy: {dLdy}, shape: {dLdy.shape}")
-    print(f"dy/dm: {dydm}, shape: {dydm.shape}")
-    print(f"dy/db: {dydb}, shape: {dydb.shape}")
-    print(f"dL/db: {dLdb}, shape: {dLdb.shape}")
-    print(f"dL/dm: {dLdm}, shape: {dLdm.shape}")
+    # Plot loss vs iteration
+    plt.figure(figsize=(8, 5))
+    plt.plot(range(num_iters), losses)
+    plt.xlabel("Iteration")
+    plt.ylabel("Loss")
+    plt.title("Loss vs iteration")
+    plt.grid(True, alpha=0.3)
+    plt.show()
 
 
 if __name__ == "__main__":
