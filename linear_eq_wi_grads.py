@@ -1,5 +1,12 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
+from datetime import datetime
+import petname
+
+# Run identifier for saved plots: [timestamp]_[RUN_NAME]_[plot_type].png
+RUN_NAME = petname.Generate(2, "_")
+OUTPUT_DIR = "outputs"
 
 # -----------------------------------------------------------------------------
 # Forward pass: y = m @ x + b, then loss
@@ -46,6 +53,13 @@ def main():
     learning_rate = 0.1
     losses = []
 
+    # One timestamp and output dir per run; plots saved as [timestamp]_[RUN_NAME]_[type].png
+    run_ts = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    def plot_path(plot_type: str) -> str:
+        return os.path.join(OUTPUT_DIR, f"{run_ts}_{RUN_NAME}_{plot_type}.png")
+
     for i in range(num_iters):
         # Forward
         y, diff, loss = forward_pass(x, m, bias, ground_truth)
@@ -66,13 +80,40 @@ def main():
     print(f"difference {diff}")
     print(f"final loss: {loss}")
 
-    # Plot loss vs iteration
+    # Plot 1: Loss vs iteration (saved)
     plt.figure(figsize=(8, 5))
     plt.plot(range(num_iters), losses)
     plt.xlabel("Iteration")
     plt.ylabel("Loss")
     plt.title("Loss vs iteration")
     plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(plot_path("loss"), dpi=150, bbox_inches="tight")
+    plt.show()
+
+    # Plot 2: Predicted vs ground truth (mirrors neural_net "predictions" style)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    out_dim = len(ground_truth)
+    x_pos = np.arange(out_dim)
+    width = 0.35
+    ax1.bar(x_pos - width / 2, ground_truth, width, label="Ground truth", color="steelblue")
+    ax1.bar(x_pos + width / 2, y, width, label="Predicted", color="coral", alpha=0.9)
+    ax1.set_xlabel("Output index")
+    ax1.set_ylabel("Value")
+    ax1.set_title("Ground truth vs predicted")
+    ax1.set_xticks(x_pos)
+    ax1.legend()
+    ax1.grid(True, alpha=0.3, axis="y")
+
+    ax2.bar(x_pos, np.ravel(diff), color="gray", alpha=0.8)
+    ax2.axhline(0, color="k", linewidth=0.5)
+    ax2.set_xlabel("Output index")
+    ax2.set_ylabel("target - prediction")
+    ax2.set_title("Residuals\nTarget - Predicted")
+    ax2.set_xticks(x_pos)
+    ax2.grid(True, alpha=0.3, axis="y")
+    plt.tight_layout()
+    plt.savefig(plot_path("predictions"), dpi=150, bbox_inches="tight")
     plt.show()
 
 
