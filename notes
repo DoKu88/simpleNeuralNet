@@ -13,3 +13,16 @@ General Plan
 
 I think we shoud just start simple and get something simple to work 
 and then later try to implement this abstract factory 
+
+Notes: 2/13/2026
+Ok, let's just start from the math and make objects for each aspect of the network
+1. Activation function sigma(z)
+   Derivative wrt activation sigma 
+2. Wx + b 
+   a. Derivative wrt W 
+   b. Derivative wrt b 
+
+For each layer we need: 
+1. Derivative wrt W 
+2. Derivative wrt b 
+3. Derivative wrt prev sigma 
