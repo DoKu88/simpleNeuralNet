@@ -84,7 +84,9 @@ class LinearLayer(Node):
     def __init__(self, in_features: int, out_features: int, rng: np.random.Generator | None = None):
         super().__init__()
         rng = rng or np.random.default_rng()
-        self.W = rng.standard_normal((out_features, in_features)) * 0.1
+        # Xavier (Glorot) initialization: scale by 1/sqrt(fan_in + fan_out)
+        scale = np.sqrt(2.0 / (in_features + out_features))
+        self.W = rng.standard_normal((out_features, in_features)) * scale
         self.b = np.zeros(out_features)
         self._last_x = None  # last input for this forward pass
 
@@ -192,6 +194,7 @@ class SquaredLoss(LossNode):
     def _loss_gradient(self, pred: np.ndarray, target: np.ndarray) -> np.ndarray:
         return -2.0 * (target - pred)
 
+# Functions for training the model on the dataset ====================================================================
 def build_dataset():
     # Option A — two interlocking half-circles (non-linear)
     X, y = make_moons(n_samples=1000, noise=0.15, random_state=42)
@@ -236,9 +239,10 @@ def mean_loss(X, y, nodes):
     return total / len(X)
 
 # -----------------------------------------------------------------------------
-# Example: linear -> ReLU -> linear -> squared loss
+# Example: linear -> ReLU -> linear ... -> squared loss
 # -----------------------------------------------------------------------------
-
+# Train and evaluate the network 
+# -----------------------------------------------------------------------------
 def main():
     np.random.seed(42)
 
@@ -251,18 +255,25 @@ def main():
     relu1 = ReLU()
     linear2 = LinearLayer(4, 4)
     relu2 = ReLU()
-    linear3 = LinearLayer(4, 1)
+    linear3 = LinearLayer(4, 4)
+    relu3 = ReLU()
+    linear4 = LinearLayer(4, 1)
     loss_fn = SquaredLoss()
 
-    nodes = [linear1, relu1, linear2, relu2, linear3, loss_fn]
+    nodes = [linear1, relu1, linear2, relu2, linear3, relu3, linear4, loss_fn]
     layers, loss_node = nodes[:-1], nodes[-1]
 
-    lr = 0.1
-    num_iters = 200
+    # Hyper-Parameters & Tracking Progress
+    # -----------------------------------------------------------------------------
+    lr = 0.05   # slightly lower for deeper net (more layers = more gradient accumulation)
+    num_iters = 400  # deeper net often needs more steps to converge
     losses = []
     val_steps = []
     val_losses = []
+    # -----------------------------------------------------------------------------
 
+    # Train Neural Network
+    # -----------------------------------------------------------------------------
     for step in range(num_iters):
         epoch_loss = 0.0
         for i in range(n_train):
@@ -292,8 +303,10 @@ def main():
             val_loss = mean_loss(X_test, y_test, nodes)
             val_steps.append(step)
             val_losses.append(val_loss)
+    # -----------------------------------------------------------------------------
 
     # Final forward (average loss on training set) and predictions using nodes
+    # -----------------------------------------------------------------------------
     total_loss = 0.0
     train_preds = np.zeros(n_train)
     for i in range(n_train):
@@ -321,7 +334,10 @@ def main():
     print(f"sample ground truth: {y0}")
     print(f"mean train loss: {avg_loss:.6f}")
     print(f"inputs tracked by linear1: {len(linear1._inputs)} (one per forward)")
+    # -----------------------------------------------------------------------------
 
+    # Plotting
+    # -----------------------------------------------------------------------------
     # Plot 1: Train and validation loss (validation every 10 iters)
     plt.figure(figsize=(8, 5))
     plt.plot(range(num_iters), losses, label="Train loss")
@@ -347,6 +363,7 @@ def main():
     ax2.set_ylabel("x2")
     plt.tight_layout()
     plt.show()
+    # -----------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
