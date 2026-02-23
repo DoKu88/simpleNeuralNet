@@ -112,10 +112,12 @@ class LinearLayer(Node):
         upstream = np.asarray(upstream, dtype=float)
         x = self._inputs[-1]  # same as _last_x
 
-        # dL/db = dL/dy (d(y)/db = I)
+        # dL/db = dL/dy (since y = Wx + b implies dy/db = 1 i.e I)
         self.dLdb = upstream.copy()
 
-        # dL/dW: dL/dW_ij = (dL/dy_i) * x_j  -> (out, in)
+        # dL/dW: Forward has y_i = sum_j W_ij x_j + b_i i.e. W_i: * x_j + b_i, so dy_i/dW_ij = x_j.
+        # Chain rule: dL/dW_ij = (dL/dy_i) * (dy_i/dW_ij) = (dL/dy_i) * x_j.
+        # So the (i,j) entry of dLdW is upstream[i] * x[j] = np.outer(upstream, x).
         self.dLdW = np.outer(upstream, x)
 
         # dL/dx = W.T @ (dL/dy)
