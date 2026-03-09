@@ -1,9 +1,9 @@
 import os
 import sys
+import subprocess
 from pprint import pprint
 from datetime import datetime
 
-import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import petname
@@ -175,17 +175,14 @@ def save_loss_curve(loss_history, epochs, frames_dir):
   plt.savefig(loss_plot_path, dpi=150, bbox_inches="tight")
   plt.close()
 
-def create_video(frames_dir, output_dir, run_ts, run_name, fps=10, seconds_per_frame=1):
+def create_video(frames_dir, output_dir, run_ts, run_name, seconds_per_frame=1):
   """
   Create an MP4 video from PNG frames stored in `frames_dir`.
 
   Frames are expected to be named like 'frame_XXXX.png'. The video is saved
-  into `output_dir` as '[run_ts]_[run_name]_conv_training.mp4'. Temporary
-  frame images are deleted after the video is written.
+  into `output_dir` as '[run_ts]_[run_name]_conv_training.mp4'.
 
-  Each frame is duplicated (fps * seconds_per_frame) times so it stays visible
-  for `seconds_per_frame` seconds. Using fps >= 10 avoids codec frame-dropping
-  that occurs at very low frame rates (e.g. fps=1).
+  Each image is held on screen for `seconds_per_frame` seconds.
   """
   frame_files = sorted(
       f for f in os.listdir(frames_dir) if f.endswith(".png") and f.startswith("frame_")
@@ -193,24 +190,20 @@ def create_video(frames_dir, output_dir, run_ts, run_name, fps=10, seconds_per_f
   if not frame_files:
     return
 
-  first_frame = cv2.imread(os.path.join(frames_dir, frame_files[0]))
-  if first_frame is None:
-    return
-
-  height, width, _ = first_frame.shape
   video_path = os.path.join(output_dir, f"{run_ts}_{run_name}_conv_training.mp4")
-  fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-  writer = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
-
-  repeats = max(1, int(fps * seconds_per_frame))
-  for fname in frame_files:
-    img = cv2.imread(os.path.join(frames_dir, fname))
-    if img is None:
-      continue
-    for _ in range(repeats):
-      writer.write(img)
-
-  writer.release()
+  input_fps = 1.0 / seconds_per_frame
+  subprocess.run(
+      [
+          "ffmpeg", "-y",
+          "-framerate", str(input_fps),
+          "-i", os.path.join(frames_dir, "frame_%04d.png"),
+          "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+          "-c:v", "libx264",
+          "-pix_fmt", "yuv420p",
+          video_path,
+      ],
+      check=True,
+  )
 
   #for fname in os.listdir(frames_dir):
   #  os.remove(os.path.join(frames_dir, fname))
@@ -243,7 +236,7 @@ if __name__ == "__main__":
     learning_rate = 1e-4
 
     # Training Loop 
-    epochs = 10  # 50 
+    epochs = 100  # 50 
     loss_history = []
     for e in range(epochs):
       pred_ys = []
@@ -280,7 +273,7 @@ if __name__ == "__main__":
       save_epoch_frame(xs, gt, pred, z_in, w_kernel, loss_avg, e, frames_dir)
 
     save_loss_curve(loss_history, epochs, frames_dir)
-    create_video(frames_dir, output_dir, run_ts, run_name, fps=10, seconds_per_frame=1)
+    create_video(frames_dir, output_dir, run_ts, run_name, seconds_per_frame=0.5)
 
 
 
