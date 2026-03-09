@@ -138,7 +138,7 @@ def save_epoch_frame(xs, ground_truth, predicted, input_z, w_kernel, loss_value,
   Save a matplotlib figure showing signals (input_z, ground_truth, predicted)
   and the current convolution kernel for a given epoch.
   """
-  fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+  fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
   ax1.plot(xs, input_z, label="input_z (noisy)", alpha=0.6)
   ax1.plot(xs, ground_truth, label="ground_truth", linewidth=2)
   ax1.plot(xs, predicted, label="predicted_y", linewidth=2)
@@ -147,7 +147,16 @@ def save_epoch_frame(xs, ground_truth, predicted, input_z, w_kernel, loss_value,
   ax1.legend()
   ax1.grid(True, alpha=0.3)
 
-  ax2.stem(np.arange(len(w_kernel)), w_kernel)
+  kernel_idxs = np.arange(len(w_kernel))
+  ax2.stem(kernel_idxs, w_kernel)
+  midpoint = (len(w_kernel) - 1) / 2
+  for idx, val in zip(kernel_idxs, w_kernel):
+    if idx <= midpoint:
+      x_offset, ha = 8, "left"
+    else:
+      x_offset, ha = -8, "right"
+    ax2.annotate(f"{val:.3f}", xy=(idx, val), xytext=(x_offset, 0),
+                 textcoords="offset points", ha=ha, va="center", fontsize=8)
   ax2.set_xlabel("kernel index")
   ax2.set_ylabel("weight")
   ax2.set_title("Convolution kernel")
@@ -158,20 +167,19 @@ def save_epoch_frame(xs, ground_truth, predicted, input_z, w_kernel, loss_value,
   fig.savefig(frame_path, dpi=150, bbox_inches="tight")
   plt.close(fig)
 
-
-def save_loss_curve(loss_history, epochs, frames_dir):
+def save_loss_curve(loss_history, epochs, output_dir, run_ts, run_name):
   """
-  Plot loss over epochs and save as an image into `frames_dir`.
+  Plot loss over epochs and save as an image into `output_dir`.
   """
   epochs_arr = np.arange(1, epochs + 1)
   plt.figure(figsize=(8, 4))
-  plt.plot(epochs_arr, loss_history, marker="o")
+  plt.plot(epochs_arr, loss_history, linewidth=0.8, marker="o", markersize=2)
   plt.xlabel("Epoch")
   plt.ylabel("Average loss")
   plt.title("Training loss over epochs")
   plt.grid(True, alpha=0.3)
   plt.tight_layout()
-  loss_plot_path = os.path.join(frames_dir, "loss_curve.png")
+  loss_plot_path = os.path.join(output_dir, f"{run_ts}_{run_name}_loss_curve.png")
   plt.savefig(loss_plot_path, dpi=150, bbox_inches="tight")
   plt.close()
 
@@ -205,13 +213,14 @@ def create_video(frames_dir, output_dir, run_ts, run_name, seconds_per_frame=1):
       check=True,
   )
 
-  #for fname in os.listdir(frames_dir):
-  #  os.remove(os.path.join(frames_dir, fname))
+  for fname in os.listdir(frames_dir):
+    os.remove(os.path.join(frames_dir, fname))
+  os.rmdir(frames_dir)
 
 # Example usage
 if __name__ == "__main__":
     # Dataset generation 
-    funcs, params, xs, ys = generate_random_sin_cos_functions(100)
+    funcs, params, xs, ys = generate_random_sin_cos_functions(500)
     func_type, amp, freq, phase = params[0]
     print(f"{func_type}(x): amplitude={amp:.2f}, frequency={freq:.2f}, phase={phase:.2f}")
     noisy_ys = [add_noise_to_function(xs, ys[i], noise_std=0.2) for i in range(len(ys))]
@@ -226,7 +235,10 @@ if __name__ == "__main__":
 
     # Define kernel and padding 
     kernel_length = 5
-    w_kernel = np.random.rand(kernel_length)
+    fan_in = kernel_length
+    fan_out = kernel_length
+    limit = np.sqrt(6.0 / (fan_in + fan_out))
+    w_kernel = np.random.uniform(-limit, limit, size=kernel_length) # xavier init
     padding_p = (len(w_kernel) -1) / 2 
     if padding_p > int(padding_p):
       print(f"padding_p {padding_p} not integer! check w_kernel length {w_kernel.shape} to be odd")
@@ -236,10 +248,12 @@ if __name__ == "__main__":
     learning_rate = 1e-4
 
     # Training Loop 
-    epochs = 100  # 50 
+    epochs = 200  # 50 
     loss_history = []
     for e in range(epochs):
       pred_ys = []
+      # regenerate every epoch
+      noisy_ys = [add_noise_to_function(xs, ys[i], noise_std=0.2) for i in range(len(ys))]
       for train_idx in range(len(xs)):
         ground_truth = ys[train_idx]
         input_z = noisy_ys[train_idx]
@@ -272,7 +286,7 @@ if __name__ == "__main__":
       z_in = noisy_ys[idx_plot]
       save_epoch_frame(xs, gt, pred, z_in, w_kernel, loss_avg, e, frames_dir)
 
-    save_loss_curve(loss_history, epochs, frames_dir)
+    save_loss_curve(loss_history, epochs, output_dir, run_ts, run_name)
     create_video(frames_dir, output_dir, run_ts, run_name, seconds_per_frame=0.5)
 
 
