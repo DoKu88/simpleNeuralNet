@@ -60,6 +60,46 @@ def add_noise_to_function(xs, ys, noise_std=0.1, rng=None):
     noise = rng.normal(loc=0.0, scale=noise_std, size=ys.shape)
     noisy_ys = ys + noise
     return noisy_ys
+  
+def add_salt_and_pepper_noise(xs, ys, noise_prob=0.05, salt_vs_pepper=0.5, rng=None):
+    """
+    Add salt-and-pepper (impulse) noise to a 1D signal.
+
+    Args:
+        xs: 1D NumPy array of x locations (unused, for consistency).
+        ys: 1D NumPy array of function values at `xs`.
+        noise_prob: Probability that any given point is corrupted.
+        salt_vs_pepper: Fraction of corrupted points that become "salt" (high),
+                        rest become "pepper" (low).
+        rng: Optional NumPy Generator. If None, a default generator is used.
+
+    Returns:
+        noisy_ys: Function values with salt-and-pepper noise.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    noisy_ys = ys.copy()
+
+    # Decide which points get corrupted
+    rand_vals = rng.random(size=ys.shape)
+    corrupt_mask = rand_vals < noise_prob
+
+    # Among corrupted points, decide salt vs pepper
+    salt_mask = rng.random(size=ys.shape) < salt_vs_pepper
+    salt_mask = np.logical_and(corrupt_mask, salt_mask)
+    pepper_mask = np.logical_and(corrupt_mask, ~salt_mask)
+
+    # Define salt and pepper levels (you can adjust these)
+    data_min = ys.min()
+    data_max = ys.max()
+    salt_value = data_max
+    pepper_value = data_min
+
+    noisy_ys[salt_mask] = salt_value
+    noisy_ys[pepper_mask] = pepper_value
+
+    return noisy_ys
 
 
 def plot_function(xs, ys, labels=None):
@@ -223,7 +263,7 @@ if __name__ == "__main__":
     funcs, params, xs, ys = generate_random_sin_cos_functions(500)
     func_type, amp, freq, phase = params[0]
     print(f"{func_type}(x): amplitude={amp:.2f}, frequency={freq:.2f}, phase={phase:.2f}")
-    noisy_ys = [add_noise_to_function(xs, ys[i], noise_std=0.2) for i in range(len(ys))]
+    noisy_ys = [add_salt_and_pepper_noise(xs, ys[i], noise_prob=0.1) for i in range(len(ys))]
 
     # Run identifier for saved outputs: [timestamp]_[RUN_NAME]_[type]
     run_ts = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
@@ -234,7 +274,7 @@ if __name__ == "__main__":
     os.makedirs(frames_dir, exist_ok=True)
 
     # Define kernel and padding 
-    kernel_length = 5
+    kernel_length = 11
     fan_in = kernel_length
     fan_out = kernel_length
     limit = np.sqrt(6.0 / (fan_in + fan_out))
@@ -253,7 +293,7 @@ if __name__ == "__main__":
     for e in range(epochs):
       pred_ys = []
       # regenerate every epoch
-      noisy_ys = [add_noise_to_function(xs, ys[i], noise_std=0.2) for i in range(len(ys))]
+      noisy_ys = [add_salt_and_pepper_noise(xs, ys[i], noise_prob=0.1) for i in range(len(ys))]
       for train_idx in range(len(xs)):
         ground_truth = ys[train_idx]
         input_z = noisy_ys[train_idx]
