@@ -149,11 +149,10 @@ class Convolution2DLayer(Node):
     self.kernel_size = (k_h, k_w)
     self.padding = (int(padding_y), int(padding_x))  # (pad_h, pad_w)
 
-    # He initialization for a single 2D kernel of shape (k_h, k_w).
-    # He (sqrt(2/fan_in)) is the correct init for ReLU/LeakyReLU activations;
-    # Xavier (sqrt(2/(fan_in+fan_out))) underestimates scale, causing dying neurons.
+    # Xavier (Glorot) initialization for a single 2D kernel of shape (k_h, k_w)
     fan_in = k_h * k_w
-    scale = np.sqrt(2.0 / fan_in)
+    fan_out = k_h * k_w
+    scale = np.sqrt(2.0 / (fan_in + fan_out))
     rng = np.random.default_rng()
     self.kernel = rng.standard_normal((k_h, k_w)) * scale
 

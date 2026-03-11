@@ -9,7 +9,7 @@ import numpy as np
 import petname
 from tqdm import tqdm
 
-from nodes import Convolution2DLayer, SquaredLoss, LeakyReLU
+from nodes import Convolution2DLayer, SquaredLoss, LeakyReLU, ReLU
 
 
 # =============================================================================
@@ -255,7 +255,6 @@ def train_conv2d_denoiser(
     epochs: int = 100,
     n_images: int = 64,
     image_size: Tuple[int, int] = (32, 32),
-    kernel_size: int = 5,
     learning_rate: float = 1e-4,
     noise_prob: float = 0.1,
     salt_vs_pepper: float = 0.5,
@@ -265,9 +264,6 @@ def train_conv2d_denoiser(
     using the same node-based pattern as in `neural_net_wi_autograd.py`.
     """
     H, W = image_size
-    if kernel_size % 2 == 0:
-        raise ValueError("kernel_size must be odd.")
-    padding = (kernel_size - 1) // 2
     rng = np.random.default_rng()
 
     clean_images = generate_base_images(
@@ -288,53 +284,34 @@ def train_conv2d_denoiser(
     out_features = np.array([H, W])
 
     conv1 = Convolution2DLayer(
-        kernel_size=np.array([kernel_size, kernel_size]),
+        kernel_size=np.array([5, 5]),
         in_features=in_features,
         out_features=out_features,
-        padding_x=padding,
-        padding_y=padding,
+        padding_x=2,
+        padding_y=2,
     )
-    relu1 = LeakyReLU()
+    relu1 = ReLU()
 
     conv2 = Convolution2DLayer(
-        kernel_size=np.array([kernel_size, kernel_size]),
+        kernel_size=np.array([5, 5]),
         in_features=in_features,
         out_features=out_features,
-        padding_x=padding,
-        padding_y=padding,
+        padding_x=2,
+        padding_y=2,
     )
-    relu2 = LeakyReLU()
+    relu2 = ReLU()
 
     conv3 = Convolution2DLayer(
-        kernel_size=np.array([kernel_size, kernel_size]),
+        kernel_size=np.array([5, 5]),
         in_features=in_features,
         out_features=out_features,
-        padding_x=padding,
-        padding_y=padding,
-    )
-    relu3 = LeakyReLU()
-
-    conv4 = Convolution2DLayer(
-        kernel_size=np.array([kernel_size, kernel_size]),
-        in_features=in_features,
-        out_features=out_features,
-        padding_x=padding,
-        padding_y=padding,
-    )
-
-    relu4 = LeakyReLU()
-
-    conv5 = Convolution2DLayer(
-        kernel_size=np.array([kernel_size, kernel_size]),
-        in_features=in_features,
-        out_features=out_features,
-        padding_x=padding,
-        padding_y=padding,
+        padding_x=2,
+        padding_y=2,
     )
 
     loss_node = SquaredLoss()
 
-    layers: List[object] = [conv1, relu1, conv2, relu2, conv3, relu3, conv4, relu4, conv5]
+    layers: List[object] = [conv1, relu1, conv2, relu2, conv3]
     nodes: List[object] = [*layers, loss_node]
     layers, loss_node = nodes[:-1], nodes[-1]
 
@@ -342,7 +319,7 @@ def train_conv2d_denoiser(
 
     # Fix a symmetric colormap range across all kernels and all epochs so
     # the color scale is constant and kernels are visually comparable.
-    all_initial_kernels = [conv1.kernel, conv2.kernel, conv3.kernel, conv4.kernel, conv5.kernel]
+    all_initial_kernels = [conv1.kernel, conv2.kernel, conv3.kernel]
     kernel_abs_max = max(np.abs(k).max() for k in all_initial_kernels)
     kernel_vmin, kernel_vmax = -kernel_abs_max, kernel_abs_max
 
@@ -399,7 +376,7 @@ def train_conv2d_denoiser(
             clean_image=clean_plot,
             noisy_image=noisy_plot,
             denoised_image=denoised_plot,
-            kernels=[conv1.kernel, conv2.kernel, conv3.kernel, conv4.kernel, conv5.kernel],
+            kernels=[conv1.kernel, conv2.kernel, conv3.kernel],
             loss_value=avg_loss,
             epoch_idx=epoch,
             frames_dir=frames_dir,
@@ -418,11 +395,10 @@ def main() -> None:
     """
     # You can tweak these hyperparameters if desired.
     train_conv2d_denoiser(
-        epochs=20,
-        n_images=500,
+        epochs=500,
+        n_images=1000,
         image_size=(32, 32),
-        kernel_size=3,  # odd-sized kernel so that padding = (k-1)/2 is integer
-        learning_rate=1e-2,
+        learning_rate=1e-3,
         noise_prob=0.1,
         salt_vs_pepper=0.5,
     )
