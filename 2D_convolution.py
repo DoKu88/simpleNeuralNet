@@ -229,38 +229,6 @@ def create_video_2d(
 # Simple 2D CNN denoising model using nodes.Convolution2DLayer + SquaredLoss
 # =============================================================================
 
-def build_simple_conv2d_model(
-    kernel_size: int,
-    image_shape: Tuple[int, int],
-) -> Tuple[Convolution2DLayer, SquaredLoss]:
-    """
-    Build a simple 2-layer "network":
-      - Convolution2DLayer (single-channel, single kernel)
-      - SquaredLoss
-
-    The padding is chosen as (k - 1) / 2 in both dimensions (must be integer),
-    which keeps the output image the same size as the input.
-    """
-    if kernel_size % 2 == 0:
-        raise ValueError("kernel_size must be odd.")
-
-    padding = (kernel_size - 1) // 2
-
-    H, W = image_shape
-    in_features = np.array([H, W])
-    out_features = np.array([H, W])
-
-    conv_layer = Convolution2DLayer(
-        kernel_size=np.array([kernel_size, kernel_size]),
-        in_features=in_features,
-        out_features=out_features,
-        padding_x=padding,
-        padding_y=padding,
-    )
-    loss_node = SquaredLoss()
-    return conv_layer, loss_node
-
-
 def train_conv2d_denoiser(
     epochs: int = 100,
     n_images: int = 64,
@@ -271,11 +239,13 @@ def train_conv2d_denoiser(
     salt_vs_pepper: float = 0.5,
 ) -> None:
     """
-    Train a simple 2D convolutional denoiser on synthetic images with salt-and-pepper noise.
-
-    The objective is to minimize SquaredLoss between clean and denoised images.
+    Train a simple 2D convolutional denoiser on synthetic images with salt-and-pepper noise,
+    using the same node-based pattern as in `neural_net_wi_autograd.py`.
     """
     H, W = image_size
+    if kernel_size % 2 == 0:
+        raise ValueError("kernel_size must be odd.")
+    padding = (kernel_size - 1) // 2
     rng = np.random.default_rng()
 
     clean_images = generate_base_images(
@@ -290,9 +260,37 @@ def train_conv2d_denoiser(
     frames_dir = os.path.join(output_dir, f"{run_ts}_{run_name}_conv2d_video_tmp")
     os.makedirs(frames_dir, exist_ok=True)
 
-    conv_layer, loss_node = build_simple_conv2d_model(
-        kernel_size=kernel_size, image_shape=image_size
-    )
+    # Build a simple stackable conv network: multiple conv layers with same
+    # input/output spatial shape, followed by a SquaredLoss node.
+    in_features = np.array([H, W])
+    out_features = np.array([H, W])
+
+    conv2D_1 = Convolution2DLayer(
+            kernel_size=np.array([kernel_size, kernel_size]),
+            in_features=in_features,
+            out_features=out_features,
+            padding_x=padding,
+            padding_y=padding,
+        )
+      
+    conv2D_2 = Convolution2DLayer(
+            kernel_size=np.array([kernel_size, kernel_size]),
+            in_features=in_features,
+            out_features=out_features,
+            padding_x=padding,
+            padding_y=padding,
+        )
+    conv2D_3 = Convolution2DLayer(
+            kernel_size=np.array([kernel_size, kernel_size]),
+            in_features=in_features,
+            out_features=out_features,
+            padding_x=padding,
+            padding_y=padding,
+        )
+
+    loss_node = SquaredLoss()
+    nodes: List[object] = [conv2D_1, conv2D_2, conv2D_3, loss_node]
+    layers, loss_node = nodes[:-1], nodes[-1]
 
     loss_history: List[float] = []
 
@@ -312,22 +310,23 @@ def train_conv2d_denoiser(
             clean = clean_images[idx]
             noisy = noisy_images[idx]
 
-            # Forward: single conv layer
-            denoised = conv_layer.forward(noisy)
+            h = noisy
+            for node in layers:
+                h = node.forward(h)
 
-            # Loss: squared loss between clean and denoised
-            # Use mean squared error per pixel to keep scales reasonable
-            loss_value = loss_node.forward(denoised.ravel(), clean.ravel()) / (H * W)
+            # Squared loss between clean and denoised; use mean per pixel
+            loss_value = loss_node.forward(h.ravel(), clean.ravel()) / (H * W)
             epoch_loss += loss_value
 
-            # Backward through loss and conv layer
-            # Match the loss scaling in the gradient (MSE instead of sum of squares)
+            # Backward: loss then layers in reverse
             upstream = loss_node.backward(1.0) / (H * W)  # shape (H*W,)
             upstream_image = upstream.reshape(image_size)
-            conv_layer.backward(upstream_image)
+            for node in reversed(layers):
+                upstream_image = node.backward(upstream_image)
 
-            # Gradient descent on kernel
-            conv_layer.update_weights(learning_rate)
+            # Gradient descent for all nodes with parameters
+            for node in nodes:
+                node.update_weights(learning_rate)
 
         avg_loss = epoch_loss / n_images
         loss_history.append(avg_loss)
@@ -337,12 +336,17 @@ def train_conv2d_denoiser(
         idx_plot = 0
         clean_plot = clean_images[idx_plot]
         noisy_plot = noisy_images[idx_plot]
-        denoised_plot = conv_layer.forward(noisy_plot)
+        h_plot = noisy_plot
+        for node in layers:
+            if node is loss_node:
+                break
+            h_plot = node.forward(h_plot)
+        denoised_plot = h_plot
         save_epoch_frame_2d(
             clean_image=clean_plot,
             noisy_image=noisy_plot,
             denoised_image=denoised_plot,
-            kernel=conv_layer.kernel,
+            kernel=conv2D_1.kernel,
             loss_value=avg_loss,
             epoch_idx=epoch,
             frames_dir=frames_dir,
@@ -360,7 +364,7 @@ def main() -> None:
     # You can tweak these hyperparameters if desired.
     train_conv2d_denoiser(
         epochs=100,
-        n_images=64,
+        n_images=500,
         image_size=(32, 32),
         kernel_size=5,  # odd-sized kernel so that padding = (k-1)/2 is integer
         learning_rate=1e-2,

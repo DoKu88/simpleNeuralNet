@@ -337,6 +337,14 @@ def main():
         total_loss += loss_node.forward(h, y)
     avg_loss = total_loss / n_train
 
+    n_test = len(X_test)
+    test_preds = np.zeros(n_test)
+    for i in range(n_test):
+        h = X_test[i]
+        for node in layers:
+            h = node.forward(h)
+        test_preds[i] = float(h)
+
     # Sample for display
     x0, y0 = X_train[0], np.ravel(y_train[0])
     h = x0
@@ -351,6 +359,8 @@ def main():
     print(f"sample predicted: {pred}")
     print(f"sample ground truth: {y0}")
     print(f"mean train loss: {avg_loss:.6f}")
+    final_val_loss = mean_loss(X_test, y_test, nodes)
+    print(f"mean validation loss: {final_val_loss:.6f}")
     print(f"inputs tracked by linear1: {len(linear1._inputs)} (one per forward)")
     # -----------------------------------------------------------------------------
 
@@ -369,8 +379,8 @@ def main():
     plt.savefig(plot_path("train_validation_loss"), dpi=150, bbox_inches="tight")
     plt.show()
 
-    # Plot 2: Final outcome — model predictions vs training set ground truth
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    # Plot 2: Final outcome — model predictions vs ground truth (train and validation)
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 10))
     ax1.scatter(X_train[:, 0], X_train[:, 1], c=y_train.ravel(), cmap="bwr", edgecolor="k", s=30)
     ax1.set_title("Ground truth (train)")
     ax1.set_xlabel("x1")
@@ -380,6 +390,16 @@ def main():
     ax2.set_title("Model prediction (train)")
     ax2.set_xlabel("x1")
     ax2.set_ylabel("x2")
+
+    ax3.scatter(X_test[:, 0], X_test[:, 1], c=y_test.ravel(), cmap="bwr", edgecolor="k", s=30)
+    ax3.set_title("Ground truth (validation)")
+    ax3.set_xlabel("x1")
+    ax3.set_ylabel("x2")
+
+    ax4.scatter(X_test[:, 0], X_test[:, 1], c=test_preds, cmap="bwr", edgecolor="k", s=30)
+    ax4.set_title("Model prediction (validation)")
+    ax4.set_xlabel("x1")
+    ax4.set_ylabel("x2")
     plt.tight_layout()
     plt.savefig(plot_path("predictions"), dpi=150, bbox_inches="tight")
     plt.show()

@@ -42,12 +42,31 @@ def backward_pass(ground_truth, y, x, m, bias):
     return dLdy, dydm, dydb, dLdm, dLdb
 
 
+# -----------------------------------------------------------------------------
+# Data generation: linear relationship y = M_true @ x + b_true
+# -----------------------------------------------------------------------------
+
+def generate_linear_data():
+    """Generate (x, ground_truth) from a known linear map for training.
+    Returns x, ground_truth, M_true, b_true so we can verify learned params."""
+    M_true = np.array([
+        [1.0, 2.0, 0.0],   # first output: 1*x0 + 2*x1 + 0*x2
+        [0.0, 1.0, 1.0],   # second output: 0*x0 + 1*x1 + 1*x2
+    ], dtype=float)
+    b_true = np.array([0.5, -0.3], dtype=float)
+
+    x = np.asarray([1.0, 0.5, 0.5])  # one 3-D input
+    ground_truth = M_true @ x + b_true
+
+    return x, ground_truth, M_true, b_true
+
+
 def main():
-    # Simple network: y = m @ x + b
-    x = np.asarray([0.5, 0.5, 0.5])
-    m = np.random.rand(2, 3)
-    bias = np.random.rand(2)
-    ground_truth = np.asarray([0.75, 0.10])
+    x, ground_truth, M_true, b_true = generate_linear_data()
+
+    # Initialize m, bias (random start; should converge toward M_true, b_true)
+    m = np.random.rand(2, 3) * 0.5
+    bias = np.random.rand(2) * 0.3
 
     num_iters = 100
     learning_rate = 0.1
@@ -79,6 +98,11 @@ def main():
     print(f"ground truth: {ground_truth}")
     print(f"difference {diff}")
     print(f"final loss: {loss}")
+    print("\n===Learned vs true linear map (model should match true)===")
+    print("M_true:\n", M_true)
+    print("m (learned):\n", m)
+    print("b_true:", b_true)
+    print("bias (learned):", bias)
 
     # Plot 1: Loss vs iteration (saved)
     plt.figure(figsize=(8, 5))

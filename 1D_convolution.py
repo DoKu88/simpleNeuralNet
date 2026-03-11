@@ -288,13 +288,13 @@ if __name__ == "__main__":
     learning_rate = 1e-4
 
     # Training Loop 
-    epochs = 200  # 50 
+    epochs = 500  # 50 
     loss_history = []
     for e in range(epochs):
       pred_ys = []
       # regenerate every epoch
       noisy_ys = [add_salt_and_pepper_noise(xs, ys[i], noise_prob=0.1) for i in range(len(ys))]
-      for train_idx in range(len(xs)):
+      for train_idx in range(len(ys)):
         ground_truth = ys[train_idx]
         input_z = noisy_ys[train_idx]
         pred_y = predict_y(input_z, padding_p, w_kernel)
@@ -327,7 +327,7 @@ if __name__ == "__main__":
       save_epoch_frame(xs, gt, pred, z_in, w_kernel, loss_avg, e, frames_dir)
 
     save_loss_curve(loss_history, epochs, output_dir, run_ts, run_name)
-    create_video(frames_dir, output_dir, run_ts, run_name, seconds_per_frame=0.5)
+    create_video(frames_dir, output_dir, run_ts, run_name, seconds_per_frame=0.25)
 
 
 
