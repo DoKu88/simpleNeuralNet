@@ -149,10 +149,11 @@ class Convolution2DLayer(Node):
     self.kernel_size = (k_h, k_w)
     self.padding = (int(padding_y), int(padding_x))  # (pad_h, pad_w)
 
-    # Xavier (Glorot) initialization for a single 2D kernel of shape (k_h, k_w)
+    # He initialization for a single 2D kernel of shape (k_h, k_w).
+    # He (sqrt(2/fan_in)) is the correct init for ReLU/LeakyReLU activations;
+    # Xavier (sqrt(2/(fan_in+fan_out))) underestimates scale, causing dying neurons.
     fan_in = k_h * k_w
-    fan_out = k_h * k_w
-    scale = np.sqrt(2.0 / (fan_in + fan_out))
+    scale = np.sqrt(2.0 / fan_in)
     rng = np.random.default_rng()
     self.kernel = rng.standard_normal((k_h, k_w)) * scale
 
@@ -332,6 +333,25 @@ class ReLU(Activation):
 
     def _f_prime(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         return (x > 0).astype(float)
+
+
+class LeakyReLU(Activation):
+    """LeakyReLU: y = x if x > 0 else alpha * x.
+    Prevents dying neurons by keeping a small gradient for negative inputs."""
+
+    def __init__(self, alpha: float = 0.01):
+        super().__init__()
+        self.alpha = alpha
+
+    @property
+    def equation(self) -> str:
+        return f"y = x if x > 0 else {self.alpha} * x"
+
+    def _f(self, x: np.ndarray) -> np.ndarray:
+        return np.where(x > 0, x, self.alpha * x)
+
+    def _f_prime(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        return np.where(x > 0, 1.0, self.alpha)
 
 class Sigmoid(Activation):
     """Sigmoid: y = 1 / (1 + exp(-x)). Backprop: dy/dx = y * (1 - y)."""

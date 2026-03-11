@@ -7,8 +7,9 @@ from typing import Tuple, List
 import matplotlib.pyplot as plt
 import numpy as np
 import petname
+from tqdm import tqdm
 
-from nodes import Convolution2DLayer, SquaredLoss
+from nodes import Convolution2DLayer, SquaredLoss, LeakyReLU
 
 
 # =============================================================================
@@ -111,44 +112,65 @@ def save_epoch_frame_2d(
     clean_image: np.ndarray,
     noisy_image: np.ndarray,
     denoised_image: np.ndarray,
-    kernel: np.ndarray,
+    kernels: List[np.ndarray],
     loss_value: float,
     epoch_idx: int,
     frames_dir: str,
+    kernel_vmin: float = -1.0,
+    kernel_vmax: float = 1.0,
 ) -> None:
     """
     Save a matplotlib figure showing:
-      - clean image
-      - noisy image
-      - denoised (predicted) image
-      - current convolution kernel
+      - Row 1: clean image, noisy image, denoised (predicted) image
+      - Row 2: all convolution kernels from left (earliest conv) to right (latest conv)
     for a given epoch.
     """
-    fig, axes = plt.subplots(1, 4, figsize=(12, 3))
+    num_kernels = len(kernels)
+    n_cols = max(3, num_kernels)
 
-    ax0, ax1, ax2, ax3 = axes
+    fig, axes = plt.subplots(2, n_cols, figsize=(4 * n_cols, 6))
 
-    im0 = ax0.imshow(clean_image, cmap="gray", vmin=0.0, vmax=1.0)
-    ax0.set_title("Clean")
-    ax0.axis("off")
-    fig.colorbar(im0, ax=ax0, fraction=0.046, pad=0.04)
+    # Ensure axes is 2D array even if n_cols == 1
+    ax_top = axes[0]
+    ax_bottom = axes[1]
 
-    im1 = ax1.imshow(noisy_image, cmap="gray", vmin=0.0, vmax=1.0)
-    ax1.set_title("Noisy")
-    ax1.axis("off")
-    fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+    # Top row: images
+    im0 = ax_top[0].imshow(clean_image, cmap="gray", vmin=0.0, vmax=1.0)
+    ax_top[0].set_title("Clean")
+    ax_top[0].axis("off")
+    fig.colorbar(im0, ax=ax_top[0], fraction=0.046, pad=0.04)
 
-    im2 = ax2.imshow(denoised_image, cmap="gray", vmin=0.0, vmax=1.0)
-    ax2.set_title("Denoised")
-    ax2.axis("off")
-    fig.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+    if n_cols > 1:
+        im1 = ax_top[1].imshow(noisy_image, cmap="gray", vmin=0.0, vmax=1.0)
+        ax_top[1].set_title("Noisy")
+        ax_top[1].axis("off")
+        fig.colorbar(im1, ax=ax_top[1], fraction=0.046, pad=0.04)
 
-    im3 = ax3.imshow(kernel, cmap="bwr")
-    ax3.set_title("Kernel")
-    ax3.axis("off")
-    for (i, j), val in np.ndenumerate(kernel):
-        ax3.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=6, color="black")
-    fig.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
+    if n_cols > 2:
+        im2 = ax_top[2].imshow(denoised_image, cmap="gray", vmin=0.0, vmax=1.0)
+        ax_top[2].set_title("Denoised")
+        ax_top[2].axis("off")
+        fig.colorbar(im2, ax=ax_top[2], fraction=0.046, pad=0.04)
+
+    # Any remaining top-row axes not used for images
+    for c in range(3, n_cols):
+        ax_top[c].axis("off")
+
+    # Bottom row: kernels left to right
+    for idx, kernel in enumerate(kernels):
+        if idx >= n_cols:
+            break
+        ax_k = ax_bottom[idx]
+        im_k = ax_k.imshow(kernel, cmap="bwr", vmin=kernel_vmin, vmax=kernel_vmax)
+        ax_k.set_title(f"Kernel {idx + 1}")
+        ax_k.axis("off")
+        for (i, j), val in np.ndenumerate(kernel):
+            ax_k.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=6, color="black")
+        fig.colorbar(im_k, ax=ax_k, fraction=0.046, pad=0.04)
+
+    # Any remaining bottom-row axes not used for kernels
+    for c in range(num_kernels, n_cols):
+        ax_bottom[c].axis("off")
 
     fig.suptitle(f"Epoch {epoch_idx + 1}, loss={loss_value:.4f}")
     plt.tight_layout()
@@ -260,29 +282,73 @@ def train_conv2d_denoiser(
     frames_dir = os.path.join(output_dir, f"{run_ts}_{run_name}_conv2d_video_tmp")
     os.makedirs(frames_dir, exist_ok=True)
 
-    # Build a simple stackable conv network: multiple conv layers with same
-    # input/output spatial shape, followed by a SquaredLoss node.
+    # Build nodes explicitly (conv -> ReLU -> conv -> ReLU -> conv -> loss),
+    # mirroring the style in `neural_net_wi_autograd.py`.
     in_features = np.array([H, W])
     out_features = np.array([H, W])
 
-    conv2D_layers = [Convolution2DLayer(
-            kernel_size=np.array([kernel_size, kernel_size]),
-            in_features=in_features,
-            out_features=out_features,
-            padding_x=padding,
-            padding_y=padding,
-        )
-        for i in range(25)]
+    conv1 = Convolution2DLayer(
+        kernel_size=np.array([kernel_size, kernel_size]),
+        in_features=in_features,
+        out_features=out_features,
+        padding_x=padding,
+        padding_y=padding,
+    )
+    relu1 = LeakyReLU()
 
+    conv2 = Convolution2DLayer(
+        kernel_size=np.array([kernel_size, kernel_size]),
+        in_features=in_features,
+        out_features=out_features,
+        padding_x=padding,
+        padding_y=padding,
+    )
+    relu2 = LeakyReLU()
+
+    conv3 = Convolution2DLayer(
+        kernel_size=np.array([kernel_size, kernel_size]),
+        in_features=in_features,
+        out_features=out_features,
+        padding_x=padding,
+        padding_y=padding,
+    )
+    relu3 = LeakyReLU()
+
+    conv4 = Convolution2DLayer(
+        kernel_size=np.array([kernel_size, kernel_size]),
+        in_features=in_features,
+        out_features=out_features,
+        padding_x=padding,
+        padding_y=padding,
+    )
+
+    relu4 = LeakyReLU()
+
+    conv5 = Convolution2DLayer(
+        kernel_size=np.array([kernel_size, kernel_size]),
+        in_features=in_features,
+        out_features=out_features,
+        padding_x=padding,
+        padding_y=padding,
+    )
 
     loss_node = SquaredLoss()
-    nodes: List[object] = [*conv2D_layers, loss_node]
+
+    layers: List[object] = [conv1, relu1, conv2, relu2, conv3, relu3, conv4, relu4, conv5]
+    nodes: List[object] = [*layers, loss_node]
     layers, loss_node = nodes[:-1], nodes[-1]
 
     loss_history: List[float] = []
 
-    # Training loop
-    for epoch in range(epochs):
+    # Fix a symmetric colormap range across all kernels and all epochs so
+    # the color scale is constant and kernels are visually comparable.
+    all_initial_kernels = [conv1.kernel, conv2.kernel, conv3.kernel, conv4.kernel, conv5.kernel]
+    kernel_abs_max = max(np.abs(k).max() for k in all_initial_kernels)
+    kernel_vmin, kernel_vmax = -kernel_abs_max, kernel_abs_max
+
+    # Training loop with progress bar over epochs
+    epoch_bar = tqdm(range(epochs), desc="Training epochs")
+    for epoch in epoch_bar:
         # New noisy version each epoch (like 1D example)
         noisy_images = add_salt_and_pepper_noise_2d(
             clean_images,
@@ -317,7 +383,7 @@ def train_conv2d_denoiser(
 
         avg_loss = epoch_loss / n_images
         loss_history.append(avg_loss)
-        print(f"Epoch {epoch} / {epochs}  |  avg loss = {avg_loss:.6f}")
+        epoch_bar.set_postfix(avg_loss=f"{avg_loss:.6f}")
 
         # Visualization of the first image in the dataset for this epoch
         idx_plot = 0
@@ -333,10 +399,12 @@ def train_conv2d_denoiser(
             clean_image=clean_plot,
             noisy_image=noisy_plot,
             denoised_image=denoised_plot,
-            kernel=conv2D_layers[-1].kernel,
+            kernels=[conv1.kernel, conv2.kernel, conv3.kernel, conv4.kernel, conv5.kernel],
             loss_value=avg_loss,
             epoch_idx=epoch,
             frames_dir=frames_dir,
+            kernel_vmin=kernel_vmin,
+            kernel_vmax=kernel_vmax,
         )
 
     # Save loss curve and create training video
@@ -350,10 +418,10 @@ def main() -> None:
     """
     # You can tweak these hyperparameters if desired.
     train_conv2d_denoiser(
-        epochs=100,
+        epochs=20,
         n_images=500,
         image_size=(32, 32),
-        kernel_size=5,  # odd-sized kernel so that padding = (k-1)/2 is integer
+        kernel_size=3,  # odd-sized kernel so that padding = (k-1)/2 is integer
         learning_rate=1e-2,
         noise_prob=0.1,
         salt_vs_pepper=0.5,
