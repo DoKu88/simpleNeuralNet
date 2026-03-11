@@ -265,31 +265,18 @@ def train_conv2d_denoiser(
     in_features = np.array([H, W])
     out_features = np.array([H, W])
 
-    conv2D_1 = Convolution2DLayer(
+    conv2D_layers = [Convolution2DLayer(
             kernel_size=np.array([kernel_size, kernel_size]),
             in_features=in_features,
             out_features=out_features,
             padding_x=padding,
             padding_y=padding,
         )
-      
-    conv2D_2 = Convolution2DLayer(
-            kernel_size=np.array([kernel_size, kernel_size]),
-            in_features=in_features,
-            out_features=out_features,
-            padding_x=padding,
-            padding_y=padding,
-        )
-    conv2D_3 = Convolution2DLayer(
-            kernel_size=np.array([kernel_size, kernel_size]),
-            in_features=in_features,
-            out_features=out_features,
-            padding_x=padding,
-            padding_y=padding,
-        )
+        for i in range(25)]
+
 
     loss_node = SquaredLoss()
-    nodes: List[object] = [conv2D_1, conv2D_2, conv2D_3, loss_node]
+    nodes: List[object] = [*conv2D_layers, loss_node]
     layers, loss_node = nodes[:-1], nodes[-1]
 
     loss_history: List[float] = []
@@ -346,7 +333,7 @@ def train_conv2d_denoiser(
             clean_image=clean_plot,
             noisy_image=noisy_plot,
             denoised_image=denoised_plot,
-            kernel=conv2D_1.kernel,
+            kernel=conv2D_layers[-1].kernel,
             loss_value=avg_loss,
             epoch_idx=epoch,
             frames_dir=frames_dir,

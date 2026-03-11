@@ -156,6 +156,9 @@ class Convolution2DLayer(Node):
     rng = np.random.default_rng()
     self.kernel = rng.standard_normal((k_h, k_w)) * scale
 
+    # Bias term for this feature map (scalar added to every output pixel)
+    self.bias = 0.0
+
     # Store meta (not yet used in computation, but keep for API symmetry)
     self.padding_x = padding_x
     self.padding_y = padding_y
@@ -168,6 +171,7 @@ class Convolution2DLayer(Node):
     self._last_cols: np.ndarray | None = None
     self._last_output_shape: tuple[int, int] | None = None
     self.dLdK: np.ndarray | None = None
+    self.dLdbias: float | None = None
 
   @property
   def equation(self) -> str:
@@ -242,6 +246,9 @@ class Convolution2DLayer(Node):
 
     out, cols, out_shape = self._convolve2d_im2col(z_input, self.kernel, self.padding)
 
+    # Add bias term (broadcast over all spatial locations)
+    out = out + self.bias
+
     # Cache for backward
     self._last_input = z_input
     self._last_input_shape = z_input.shape
@@ -274,6 +281,10 @@ class Convolution2DLayer(Node):
     dK_flat = cols.T @ upstream_flat  # (k_h * k_w,)
     self.dLdK = dK_flat.reshape(k_h, k_w)
 
+    # ---- Gradient w.r.t. bias ----
+    # bias is added uniformly to every output pixel: dL/dbias = sum_{p,q} upstream[p,q]
+    self.dLdbias = float(np.sum(upstream))
+
     # ---- Gradient w.r.t. input z ----
     # Use convolution of upstream with flipped kernel, then crop padding.
     pad_h, pad_w = self.padding
@@ -302,10 +313,11 @@ class Convolution2DLayer(Node):
     return dz
 
   def update_weights(self, lr: float) -> None:
-    """Gradient descent step on the kernel: k -= lr * dLdK."""
-    if self.dLdK is None:
-      raise RuntimeError("update_weights called before backward; dLdK is None.")
+    """Gradient descent step on the kernel and bias: k -= lr * dLdK, b -= lr * dLdbias."""
+    if self.dLdK is None or self.dLdbias is None:
+      raise RuntimeError("update_weights called before backward; gradients are None.")
     self.kernel -= lr * self.dLdK
+    self.bias -= lr * self.dLdbias
 
 
 class ReLU(Activation):
