@@ -284,29 +284,29 @@ def train_conv2d_denoiser(
     out_features = np.array([H, W])
 
     conv1 = Convolution2DLayer(
-        kernel_size=np.array([5, 5]),
+        kernel_size=np.array([3, 3]),
         in_features=in_features,
         out_features=out_features,
-        padding_x=2,
-        padding_y=2,
+        padding_x=1,
+        padding_y=1,
     )
     relu1 = ReLU()
 
     conv2 = Convolution2DLayer(
-        kernel_size=np.array([5, 5]),
+        kernel_size=np.array([3, 3]),
         in_features=in_features,
         out_features=out_features,
-        padding_x=2,
-        padding_y=2,
+        padding_x=1,
+        padding_y=1,
     )
     relu2 = ReLU()
 
     conv3 = Convolution2DLayer(
-        kernel_size=np.array([5, 5]),
+        kernel_size=np.array([3, 3]),
         in_features=in_features,
         out_features=out_features,
-        padding_x=2,
-        padding_y=2,
+        padding_x=1,
+        padding_y=1,
     )
 
     loss_node = SquaredLoss()
