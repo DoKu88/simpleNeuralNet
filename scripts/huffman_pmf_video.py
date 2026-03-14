@@ -230,35 +230,38 @@ def make_frame(dist_name: str, pmf: dict[str, float], out_path: str):
     probs   = list(pmf.values())
 
     # ---- figure layout ----
-    fig = plt.figure(figsize=(16, 6), facecolor="#1A1A2E")
+    fig = plt.figure(figsize=(16, 6), facecolor="#1E1E1E")
     fig.suptitle(
         f"{dist_name}      H(X) = {h:.4f} bits",
         fontsize=16, fontweight="bold", color="white", y=0.97
     )
 
-    gs = fig.add_gridspec(1, 3, left=0.03, right=0.97, top=0.88, bottom=0.05,
+    TITLE_TOP = 0.91   # top of all three panels (same height)
+    BOTTOM    = 0.12   # raised bottom gives room for PMF x-axis labels
+
+    gs = fig.add_gridspec(1, 3, left=0.01, right=0.97,
+                          top=TITLE_TOP, bottom=BOTTOM,
                           wspace=0.18, width_ratios=[0.8, 2.4, 1.6])
     ax_table = fig.add_subplot(gs[0])
     ax_tree  = fig.add_subplot(gs[1])
     ax_bar   = fig.add_subplot(gs[2])
 
     for ax in (ax_table, ax_tree, ax_bar):
-        ax.set_facecolor("#16213E")
+        ax.set_facecolor("#2A2A2A")
         for spine in ax.spines.values():
-            spine.set_edgecolor("#444466")
+            spine.set_edgecolor("#444444")
 
     # ---- LEFT: probability table ----
     ax_table.axis("off")
-    ax_table.set_title("Probability Table", color="white", fontsize=11, pad=6)
 
-    col_labels = ["Symbol", "P(x)", "Len"]
+    col_labels = ["Symbol", "P(x)", "Depth"]
     table_data = [
         [s, f"{pmf[s]:.4f}", str(len(codes.get(s, "")))]
         for s in symbols
     ]
 
-    # Explicit column widths: Symbol and Len are short, P(x) is wider
-    col_widths = [0.18, 0.30, 0.14]
+    # Explicit column widths
+    col_widths = [0.24, 0.30, 0.22]
     tbl = ax_table.table(
         cellText=table_data,
         colLabels=col_labels,
@@ -272,16 +275,28 @@ def make_frame(dist_name: str, pmf: dict[str, float], out_path: str):
 
     # Style table cells
     for (row, col), cell in tbl.get_celld().items():
-        cell.set_edgecolor("#444466")
+        cell.set_edgecolor("#444444")
         if row == 0:
-            cell.set_facecolor("#2A2A5A")
+            cell.set_facecolor("#3A3A3A")
             cell.set_text_props(color="white", fontweight="bold")
         else:
-            cell.set_facecolor("#1E2A4A" if row % 2 == 0 else "#16213E")
-            cell.set_text_props(color="#CCDDFF")
+            cell.set_facecolor("#333333" if row % 2 == 0 else "#2A2A2A")
+            cell.set_text_props(color="#DDDDDD")
+
+    # Place "Probability Table" label just above the table's top edge
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    tbl_bb = tbl.get_window_extent(renderer)                      # pixels
+    ax_bb  = ax_table.get_window_extent(renderer)                 # pixels
+    # top of table in axes-fraction coordinates
+    table_top_axes = (tbl_bb.y1 - ax_bb.y0) / ax_bb.height
+    ax_table.text(0.5, table_top_axes + 0.03, "Probability Table",
+                  transform=ax_table.transAxes,
+                  ha="center", va="bottom",
+                  color="white", fontsize=11)
 
     # ---- CENTRE: Huffman tree ----
-    ax_tree.set_title("Huffman Tree", color="white", fontsize=11, pad=6)
+    ax_tree.set_title("Huffman Tree", color="white", fontsize=11, pad=8)
     draw_tree(ax_tree, positions)
 
     x_pad = 1.0
@@ -291,20 +306,32 @@ def make_frame(dist_name: str, pmf: dict[str, float], out_path: str):
     ax_tree.set_aspect("equal")
     ax_tree.axis("off")
 
-    # Legend
+    # Legend – pick the corner furthest from any node
+    x_lo, x_hi = min(xs) - x_pad, max(xs) + x_pad
+    y_lo, y_hi = min(ys) - y_pad, max(ys) + y_pad
+    corners = {
+        "upper right": (x_hi, y_hi),
+        "upper left":  (x_lo, y_hi),
+        "lower right": (x_hi, y_lo),
+        "lower left":  (x_lo, y_lo),
+    }
+    def _min_dist_to_nodes(cx, cy):
+        return min(((cx - x) ** 2 + (cy - y) ** 2) ** 0.5
+                   for x, y in zip(xs, ys))
+    best_loc = max(corners, key=lambda k: _min_dist_to_nodes(*corners[k]))
+
     leaf_patch = mpatches.Patch(color=LEAF_COLOR, label="Leaf (symbol)")
     int_patch  = mpatches.Patch(color=INT_COLOR,  label="Internal")
-    ax_tree.legend(handles=[leaf_patch, int_patch], loc="upper right",
-                   fontsize=7, facecolor="#16213E", edgecolor="#444466",
+    ax_tree.legend(handles=[leaf_patch, int_patch], loc=best_loc,
+                   fontsize=7, facecolor="#2A2A2A", edgecolor="#444444",
                    labelcolor="white")
 
     # ---- RIGHT: PMF bar chart ----
-    ax_bar.set_title("PMF", color="white", fontsize=11, pad=6)
-    colors = plt.cm.plasma(np.linspace(0.2, 0.85, len(symbols)))
-    bars = ax_bar.bar(symbols, probs, color=colors, edgecolor="#333355", linewidth=0.8)
-    ax_bar.set_xlabel("Symbol", color="#CCDDFF", fontsize=9)
-    ax_bar.set_ylabel("Probability", color="#CCDDFF", fontsize=9)
-    ax_bar.tick_params(colors="#CCDDFF", labelsize=8)
+    ax_bar.set_title("Probability Mass Function", color="white", fontsize=11, pad=8)
+    bars = ax_bar.bar(symbols, probs, color="#4C9BE8", edgecolor="#222222", linewidth=0.8)
+    ax_bar.set_xlabel("Symbol", color="#DDDDDD", fontsize=9)
+    ax_bar.set_ylabel("Probability", color="#DDDDDD", fontsize=9)
+    ax_bar.tick_params(colors="#DDDDDD", labelsize=8)
     ax_bar.set_ylim(0, max(probs) * 1.2)
 
     # Probability value on top of each bar
@@ -312,7 +339,7 @@ def make_frame(dist_name: str, pmf: dict[str, float], out_path: str):
         ax_bar.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + max(probs) * 0.02,
-            f"{p:.3f}", ha="center", va="bottom", fontsize=7, color="#CCDDFF"
+            f"{p:.3f}", ha="center", va="bottom", fontsize=7, color="#DDDDDD"
         )
 
     plt.savefig(out_path, dpi=120, facecolor=fig.get_facecolor())
@@ -340,7 +367,7 @@ def main():
     # Build video: each frame shown for 1 second → 1 fps with -r 1 doesn't
     # always work well; use 30 fps and duplicate frames instead.
     FPS = 30
-    DURATION_SEC = 1          # seconds per distribution
+    DURATION_SEC = 3          # seconds per distribution
     HOLD_FRAMES  = FPS * DURATION_SEC
 
     # Write a concat list
