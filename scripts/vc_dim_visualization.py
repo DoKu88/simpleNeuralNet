@@ -26,21 +26,27 @@ PTS4 = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0,  1.0], [-1.0,  1.0]])
 
 def find_separator(pts, labels):
     """
-    Try to find a linear separator for `labels` (+1 / -1) on `pts`.
-    Uses a simple perceptron / brute-force search over angle+bias for robustness.
+    Find the max-margin linear separator for `labels` (+1 / -1) on `pts`.
+    For each candidate normal direction w, the valid bias range is solved
+    analytically, and the midpoint (max margin for that direction) is chosen.
     Returns (found, w, b) where the line is w·x + b = 0.
     """
-    # Search bias from 0 outward so the line passes through the visible region.
-    biases = np.linspace(-2.5, 2.5, 400)
-    biases = biases[np.argsort(np.abs(biases))]
-    for angle in np.linspace(0, 2 * np.pi, 720):
+    best = None  # (margin, w, bias)
+    for angle in np.linspace(0, 2 * np.pi, 1440):
         w = np.array([np.cos(angle), np.sin(angle)])
-        scores = pts @ w          # shape (n,)
-        for bias in biases:
-            preds = np.sign(scores + bias)
-            preds[preds == 0] = 1
-            if np.all(preds == labels):
-                return True, w, bias
+        scores = pts @ w                     # signed projection, shape (n,)
+        pos_scores = scores[labels == 1]
+        neg_scores = scores[labels == -1]
+        # Need: scores[i] + bias > 0 for +1 class  → bias > -min(pos_scores)
+        # Need: scores[i] + bias < 0 for -1 class  → bias < -max(neg_scores)
+        lo = -np.min(pos_scores) if len(pos_scores) > 0 else -3.0
+        hi = -np.max(neg_scores) if len(neg_scores) > 0 else  3.0
+        if lo < hi:
+            margin = (hi - lo) / 2
+            if best is None or margin > best[0]:
+                best = (margin, w, (lo + hi) / 2)
+    if best is not None:
+        return True, best[1], best[2]
     return False, None, None
 
 
