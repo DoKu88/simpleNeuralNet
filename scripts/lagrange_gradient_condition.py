@@ -41,7 +41,7 @@ fig.patch.set_facecolor("white")
 ax.set_facecolor("#fafafa")
 
 # Filled contour (loss landscape)
-lvl_fill = np.linspace(0.05, 28, 60)
+lvl_fill = np.linspace(0, 28, 60)
 cf = ax.contourf(X, Y, F, levels=lvl_fill, cmap="Blues", alpha=0.35, zorder=0)
 
 # Contour lines
@@ -101,7 +101,8 @@ label(ax, x0 + tlen*tan0, "tangent to $g=c$",
 draw_arrow(ax, x0, gf0_u, "#1a6faf", lw=3.0)
 draw_arrow(ax, x0, gg0_u, "#c0392b", lw=3.0)
 
-label(ax, x0 + gf0_u * 0.5, r"$\nabla f(x_0)$", "#1a6faf", dx=0.12, dy=0.12, bold=True)
+gf0_perp = np.array([-gf0_u[1], gf0_u[0]]) / np.linalg.norm(gf0_u) * 0.22
+label(ax, x0 + gf0_u + gf0_perp, r"$\nabla f(x_0)$", "#1a6faf", dx=0.0, dy=0.0, bold=True)
 label(ax, x0 + gg0_u, r"$\nabla g(x_0)$", "#c0392b", dx=-0.1, dy=0.08, bold=True)
 
 
@@ -116,7 +117,8 @@ tan1 = tangent(x1)
 gf1_tang_scalar = np.dot(gf1_u, tan1)
 gf1_norm_scalar = np.dot(gf1_u, x1 / np.linalg.norm(x1))
 
-gf1_tang_vec = gf1_tang_scalar * tan1
+# Match magnitude of tangential vec to the improvement arrow (SCALE_NOPT)
+gf1_tang_vec = np.sign(gf1_tang_scalar) * tan1 * SCALE_NOPT
 gf1_norm_vec = gf1_norm_scalar * (x1 / np.linalg.norm(x1))
 
 ax.plot(*x1, "s", color="#e67e22", markersize=13, zorder=9,
@@ -124,7 +126,8 @@ ax.plot(*x1, "s", color="#e67e22", markersize=13, zorder=9,
 
 # ∇f full arrow
 draw_arrow(ax, x1, gf1_u, "#1a6faf", lw=3.5, alpha=1.0)
-label(ax, x1 + gf1_u * 0.5, r"$\nabla f(x_1)$", "#1a6faf", dx=0.12, dy=0.12, bold=True)
+gf1_perp = np.array([-gf1_u[1], gf1_u[0]]) / np.linalg.norm(gf1_u) * 0.22
+label(ax, x1 + gf1_u + gf1_perp, r"$\nabla f(x_1)$", "#1a6faf", dx=0.0, dy=0.0, bold=True)
 
 # ∇g arrow
 draw_arrow(ax, x1, gg1_u, "#c0392b", lw=3.5, alpha=1.0)
@@ -182,7 +185,8 @@ ax.legend(handles=handles + legend_extras,
           labels=labels_leg + [h.get_label() for h in legend_extras],
           fontsize=10, loc="lower left", framealpha=0.92, edgecolor="#aaaaaa")
 
-plt.colorbar(cf, ax=ax, fraction=0.03, pad=0.02, label=r"$f(x)$")
+cb = plt.colorbar(cf, ax=ax, fraction=0.03, pad=0.02, label=r"$f(x)$")
+cb.set_ticks(range(0, 29, 4))
 plt.tight_layout()
 plt.savefig("outputs/lagrange_gradient_condition.png", dpi=150, bbox_inches="tight")
 plt.show()
