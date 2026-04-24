@@ -67,7 +67,9 @@ def ellipse_wh(c):
 
 
 def ridge_estimate(r):
-    """Closest point on the circle of radius r to the OLS minimum (in RSS metric)."""
+    """Ridge estimate: OLS when constraint is inactive, else tangency point on disk boundary."""
+    if np.linalg.norm(BETA_OLS) <= r:
+        return BETA_OLS.copy()
     phis  = np.linspace(0, 2 * np.pi, 8_000)
     cands = r * np.stack([np.cos(phis), np.sin(phis)], axis=1)
     rss   = np.einsum("ni,ij,nj->n", cands - BETA_OLS, A, cands - BETA_OLS)
@@ -92,7 +94,12 @@ y_hi = max( r_max * 1.05, BETA_OLS[1] + h_out * 0.50) + 0.4
 # ══════════════════════════════════════════════════════════════════════════════
 #  FIGURE
 # ══════════════════════════════════════════════════════════════════════════════
-fig, ax = plt.subplots(figsize=(9, 7))
+x_range = x_hi - x_lo
+y_range = y_hi - y_lo
+fig_w   = 9.0
+fig_h   = fig_w * (y_range / x_range) / 0.88   # 0.88 = top−bottom margin fraction
+
+fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 fig.patch.set_facecolor("white")
 ax.set_facecolor("white")
 for sp in ax.spines.values():
@@ -104,7 +111,7 @@ ax.set_ylim(y_lo, y_hi)
 ax.set_aspect("equal")
 
 ax.set_title(r"$L(w) = \|y - Xw\|^2 + \lambda\|w\|^2$", fontsize=TITLE_FS, pad=6)
-plt.subplots_adjust(left=0.04, right=0.97, top=0.97, bottom=0.04)
+plt.subplots_adjust(left=0.04, right=0.97, top=0.93, bottom=0.05)
 
 # ── Coordinate axes ───────────────────────────────────────────────────────────
 _ax_arr = dict(arrowstyle="-|>", color=AXIS_COLOR, lw=1.6, mutation_scale=12)
@@ -155,7 +162,7 @@ lam_txt       = ax.text(x_lo + 0.15, y_hi - 0.15, "",
 def update(i):
     lam, r, br = frame_data[i]
 
-    disk_patch.set_radius(r)
+    disk_patch.set_radius(np.linalg.norm(br))
     dash_line.set_data([BETA_OLS[0], br[0]], [BETA_OLS[1], br[1]])
     ridge_dot.set_offsets([br])
 

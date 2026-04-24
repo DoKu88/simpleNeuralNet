@@ -3,12 +3,14 @@ ridge_lambda_animation.py
 
 GIF: sweeps λ from near-0 to large, showing
 
-    w_ridge(λ) = Q · diag( λ_i / (λ_i + λ) ) · Q^T · w_opt
+    w_ridge(λ) = Q · diag( λ_i / (λ_i + λ) ) · Q^T · w_OLS
 
-Three visible consequences:
-  λ → 0:   w_ridge → w_opt          (factors → 1)
-  λ → ∞:   w_ridge → 0             (factors → 0)
-  General:  smaller λ_i shrunk more  (differential shrinkage)
+Layout
+------
+[0,0]  Eigenvalue Magnitude Curves
+[0,1]  Solution path w_ridge in weight space
+[1,0]  Eigenvector components in w₁–w₂ space (new)
+[1,1]  Regression plot (y vs x₁)
 """
 
 from datetime import datetime
@@ -16,6 +18,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib.lines import Line2D
 import numpy as np
 
 REPO_ROOT  = Path(__file__).resolve().parent.parent
@@ -38,6 +41,9 @@ XtX = X.T @ X
 Xty = X.T @ y
 eigenvalues, Q = np.linalg.eigh(XtX)   # ascending: [λ_small, λ_large]
 w_ols = np.linalg.solve(XtX, Xty)
+
+# Projection of w_OLS onto each eigenvector: w_OLS = sum_j alpha_j * Q[:,j]
+alpha = Q.T @ w_ols   # [alpha_small, alpha_large]
 
 
 def ridge_w(lam):
@@ -106,83 +112,121 @@ super_title = fig.text(
     ha="center", va="center", fontsize=14, color=TEXT_COL, fontweight="bold",
 )
 
-# ── [0,0]: Shrinkage factor bars ───────────────────────────────────────────────
-ax00.set_xlim(-0.6, 1.6)
-ax00.set_ylim(0, 1.22)
-ax00.set_xticks([0, 1])
-ax00.set_xticklabels(
-    [rf"$\lambda_{{\rm small}}$" + f"\n= {eigenvalues[0]:.1f}",
-     rf"$\lambda_{{\rm large}}$" + f"\n= {eigenvalues[1]:.1f}"],
-    color=TEXT_COL, fontsize=10,
-)
-ax00.set_ylabel(r"$\lambda_i\,/\,(\lambda_i + \lambda)$", color=TEXT_COL, fontsize=11)
-ax00.set_title("Diagonal shrinkage matrix entries\n1 = Keep (OLS),  0 = Fully Shrunk",
-               color=TEXT_COL, fontsize=10, pad=8)
-ax00.axhline(1.0, color="grey", lw=0.8, ls="--", alpha=0.4)
-ax00.grid(axis="y", color=GRID_COL, alpha=0.5)
-
-bars = ax00.bar([0, 1], [1.0, 1.0], color=EI_COLORS, alpha=0.85, width=0.6,
-                edgecolor="white", linewidth=0.8)
-bar_texts = [
-    ax00.text(0, 1.07, "1.000", ha="center", va="bottom",
-              color=TEXT_COL, fontsize=12, fontweight="bold"),
-    ax00.text(1, 1.07, "1.000", ha="center", va="bottom",
-              color=TEXT_COL, fontsize=12, fontweight="bold"),
-]
-
-# ── [0,1]: Shrinkage curves with animated cursor ───────────────────────────────
+# ── [0,0]: Eigenvalue Magnitude Curves ────────────────────────────────────────
 for j in range(2):
     name = r"\lambda_{\rm small}" if j == 0 else r"\lambda_{\rm large}"
     lbl  = rf"${name}={eigenvalues[j]:.1f}$"
-    ax01.semilogx(lambdas_full, shrink_full[:, j],
+    ax00.semilogx(lambdas_full, shrink_full[:, j],
                   color=EI_COLORS[j], lw=2.5, label=lbl)
 
-ax01.axhline(1.0, color="white", lw=1.0, ls=":", alpha=0.7,
+ax00.axhline(1.0, color="white", lw=1.0, ls=":", alpha=0.7,
              label=r"OLS limit  ($\lambda\to 0$)")
-ax01.axhline(0.0, color="white", lw=1.0, ls=":", alpha=0.7,
+ax00.axhline(0.0, color="white", lw=1.0, ls=":", alpha=0.7,
              label=r"zero  ($\lambda\to\infty$)")
-ax01.set_ylim(-0.06, 1.14)
-ax01.set_xlabel(r"$\lambda$  (log scale)", color=TEXT_COL, fontsize=10)
-ax01.set_ylabel(r"$\lambda_i\,/\,(\lambda_i + \lambda)$", color=TEXT_COL, fontsize=11)
-ax01.set_title("Eigenvalue Magnitude Curves",
-               color=TEXT_COL, fontsize=10, pad=8)
-ax01.legend(fontsize=8, facecolor=PANEL_BG, edgecolor="#30363d",
+ax00.set_ylim(-0.06, 1.14)
+ax00.set_xlabel(r"$\lambda$  (log scale)", color=TEXT_COL, fontsize=10)
+ax00.set_ylabel(r"$\lambda_i\,/\,(\lambda_i + \lambda)$", color=TEXT_COL, fontsize=11)
+ax00.set_title("Eigenvalue Magnitude Curves", color=TEXT_COL, fontsize=10, pad=8)
+ax00.legend(fontsize=8, facecolor=PANEL_BG, edgecolor="#30363d",
             labelcolor=TEXT_COL, loc="lower left")
-ax01.grid(True, color=GRID_COL, alpha=0.5)
+ax00.grid(True, color=GRID_COL, alpha=0.5)
 
-cursor_vline = ax01.axvline(lambdas_anim[0], color="white", lw=1.5, ls="--",
+cursor_vline = ax00.axvline(lambdas_anim[0], color="white", lw=1.5, ls="--",
                              alpha=0.85, zorder=5)
 cursor_dots  = [
-    ax01.scatter([lambdas_anim[0]],
+    ax00.scatter([lambdas_anim[0]],
                  [eigenvalues[j] / (eigenvalues[j] + lambdas_anim[0])],
                  color=EI_COLORS[j], s=90, zorder=6,
                  edgecolors="white", linewidths=0.8)
     for j in range(2)
 ]
 
-# ── [1,0]: Solution path in weight space ───────────────────────────────────────
-ax10.contourf(W1G, W2G, LOSS,
+# ── [0,1]: Solution path in weight space ───────────────────────────────────────
+ax01.contourf(W1G, W2G, LOSS,
               levels=np.linspace(LOSS.min(), LOSS.max(), 35),
               cmap="Blues", alpha=0.22, zorder=0)
-ax10.contour(W1G, W2G, LOSS, levels=contour_levels,
+ax01.contour(W1G, W2G, LOSS, levels=contour_levels,
              colors="#4a90d9", linewidths=0.9, alpha=0.5, zorder=1)
-ax10.plot(w_path[:, 0], w_path[:, 1],
+ax01.plot(w_path[:, 0], w_path[:, 1],
           color="#888888", lw=1.5, alpha=0.55, zorder=2)
-ax10.scatter(*w_ols, color="#f1c40f", s=150, marker="*", zorder=8,
+ax01.scatter(*w_ols, color="#f1c40f", s=150, marker="*", zorder=8,
              edgecolors="white", linewidths=1.2, label=r"$w_{\rm OLS}$")
-ax10.scatter(0, 0, color="grey", s=80, marker="x", linewidths=2.5, zorder=6)
-ax10.text(0.13, 0.06, r"$\lambda\to\infty$", fontsize=9, color="grey")
+ax01.scatter(0, 0, color="grey", s=80, marker="x", linewidths=2.5, zorder=6)
+ax01.text(0.13, 0.06, r"$\lambda\to\infty$", fontsize=9, color="grey")
 
-path_dot, = ax10.plot([], [], "o", color="#ff6b6b", ms=11,
+path_dot, = ax01.plot([], [], "o", color="#ff6b6b", ms=11,
                       markeredgecolor="white", markeredgewidth=1.2,
                       zorder=9, label=r"$w_{\rm ridge}$")
+ax01.set_xlabel(r"$w_1$", color=TEXT_COL, fontsize=12)
+ax01.set_ylabel(r"$w_2$", color=TEXT_COL, fontsize=12)
+ax01.set_title(r"Solution Path $w_{\rm ridge}$ in Weight Space",
+               color=TEXT_COL, fontsize=10, pad=8)
+ax01.legend(fontsize=9, facecolor=PANEL_BG, edgecolor="#30363d", labelcolor=TEXT_COL)
+ax01.set_aspect("equal")
+ax01.grid(True, color=GRID_COL, alpha=0.3)
+
+# ── [1,0]: Eigenvector components in w₁–w₂ space ──────────────────────────────
+# w_ridge = sum_j sf_j * alpha_j * Q[:,j]  where sf_j = λ_j/(λ_j+λ)
+ev_lim = max(np.abs(w_ols).max() * 1.5, 1.8)
+ax10.set_xlim(-ev_lim, ev_lim)
+ax10.set_ylim(-ev_lim, ev_lim)
+ax10.set_aspect("equal")
+ax10.axhline(0, color="#30363d", lw=0.8, zorder=1)
+ax10.axvline(0, color="#30363d", lw=0.8, zorder=1)
+
+# Faint dashed lines showing full eigenvector directions
+for j in range(2):
+    v = Q[:, j]
+    ax10.plot([-ev_lim * v[0], ev_lim * v[0]],
+              [-ev_lim * v[1], ev_lim * v[1]],
+              color=EI_COLORS[j], lw=0.9, ls="--", alpha=0.25, zorder=1)
+
+# Faint static OLS components: alpha_j * Q[:,j]
+for j in range(2):
+    tip = alpha[j] * Q[:, j]
+    ax10.annotate("", xy=tip, xytext=(0, 0),
+                  arrowprops=dict(arrowstyle="-|>", color=EI_COLORS[j],
+                                  lw=1.5, alpha=0.25, mutation_scale=12),
+                  zorder=2)
+
+# Animated ridge component arrows (quiver, updated each frame)
+sf0 = eigenvalues / (eigenvalues + lambdas_anim[0])
+eigen_quivers = []
+for j in range(2):
+    tip = sf0[j] * alpha[j] * Q[:, j]
+    q = ax10.quiver(0, 0, tip[0], tip[1],
+                    color=EI_COLORS[j],
+                    scale=1, scale_units="xy", angles="xy",
+                    width=0.010, headwidth=5, headlength=6,
+                    zorder=5)
+    eigen_quivers.append(q)
+
+# w_OLS (static star) and w_ridge (animated dot)
+ax10.scatter(*w_ols, color="#f1c40f", s=150, marker="*", zorder=8,
+             edgecolors="white", linewidths=1.2)
+ridge_dot_ev, = ax10.plot([], [], "o", color="#ff6b6b", ms=11,
+                           markeredgecolor="white", markeredgewidth=1.2,
+                           zorder=9)
+
 ax10.set_xlabel(r"$w_1$", color=TEXT_COL, fontsize=12)
 ax10.set_ylabel(r"$w_2$", color=TEXT_COL, fontsize=12)
-ax10.set_title(r"Solution path $w_{\rm ridge}$ in weight space",
+ax10.set_title(r"Eigenvector Components as $\lambda$ Varies",
                color=TEXT_COL, fontsize=10, pad=8)
-ax10.legend(fontsize=9, facecolor=PANEL_BG, edgecolor="#30363d", labelcolor=TEXT_COL)
-ax10.set_aspect("equal")
 ax10.grid(True, color=GRID_COL, alpha=0.3)
+
+# Legend via proxy artists
+legend_handles = [
+    Line2D([0], [0], color=EI_COLORS[0], lw=2.5,
+           label=rf"$\lambda_{{\rm small}}={eigenvalues[0]:.1f}$ component"),
+    Line2D([0], [0], color=EI_COLORS[1], lw=2.5,
+           label=rf"$\lambda_{{\rm large}}={eigenvalues[1]:.1f}$ component"),
+    Line2D([0], [0], color="#f1c40f", lw=0, marker="*", markersize=10,
+           label=r"$w_{\rm OLS}$"),
+    Line2D([0], [0], color="#ff6b6b", lw=0, marker="o", markersize=8,
+           label=r"$w_{\rm ridge}$"),
+]
+ax10.legend(handles=legend_handles, fontsize=8, facecolor=PANEL_BG,
+            edgecolor="#30363d", labelcolor=TEXT_COL)
 
 # ── [1,1]: Regression plot (y vs x₁, x₂ held at mean = 0) ────────────────────
 ax11.scatter(x1_vals, y, s=18, color="#4a9edd", alpha=0.45, zorder=2, label="Data")
@@ -210,29 +254,28 @@ def update(frame):
     w_r = ridge_w(lam)
     sf  = eigenvalues / (eigenvalues + lam)
 
-    # [0,0] shrinkage bars
-    for bar, s in zip(bars, sf):
-        bar.set_height(s)
-    for txt, s, x in zip(bar_texts, sf, [0, 1]):
-        txt.set_position((x, max(s + 0.04, 0.07)))
-        txt.set_text(f"{s:.3f}")
-
-    # [0,1] cursor
+    # [0,0] cursor on eigenvalue magnitude curves
     cursor_vline.set_xdata([lam, lam])
     for j, dot in enumerate(cursor_dots):
         dot.set_offsets([[lam, sf[j]]])
 
-    # [1,0] path dot
+    # [0,1] solution path dot
     path_dot.set_data([w_r[0]], [w_r[1]])
 
-    # [1,1] regression line (slope = w_r[0], x2 at mean = 0)
+    # [1,0] eigenvector component arrows and ridge dot
+    for j, q in enumerate(eigen_quivers):
+        tip = sf[j] * alpha[j] * Q[:, j]
+        q.set_UVC(tip[0], tip[1])
+    ridge_dot_ev.set_data([w_r[0]], [w_r[1]])
+
+    # [1,1] regression line
     fit_line.set_data(x1_plot, w_r[0] * x1_plot)
 
-    # title λ readout
+    # λ readout
     super_title.set_text(rf"$\lambda={lam:.2f}$")
 
-    return [*bars, *bar_texts, cursor_vline, *cursor_dots,
-            path_dot, fit_line, super_title]
+    return [cursor_vline, *cursor_dots, path_dot,
+            *eigen_quivers, ridge_dot_ev, fit_line, super_title]
 
 
 anim = animation.FuncAnimation(
