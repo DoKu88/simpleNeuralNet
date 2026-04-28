@@ -4,13 +4,13 @@ ridge_bias_variance.py
 GIF: sweeps λ from near-0 to large, showing how L2 ridge regression
 trades off bias and variance across repeated noisy dataset realisations.
 
-A degree-9 polynomial model is fit to 15 noisy samples of a smooth
-ground truth. Small λ → overfit (high variance, low bias).
-Large λ → underfit (low variance, high bias).
+Model: RBF (Gaussian) basis with 50 centres and only 20 training points
+→ heavily underdetermined at small λ (wild variance), collapses cleanly
+with regularisation.
 
 Layout
 ------
-Left (full height):  60 ridge fits from independent noise realisations (faint)
+Left (full height):  Prediction band (10–90th pctile) across 200 realisations
                      + mean prediction + ground truth + one example scatter
 Top right:           Bias²(λ), Variance(λ), Bias²+Variance vs λ (log scale)
 Bottom right:        Current Bias² vs Variance bar chart
@@ -43,41 +43,34 @@ def f_true(x):
     return np.sin(2.5 * x) + 0.4 * np.cos(5 * x)
 
 
-NOISE_STD  = 1.0
-N_TRAIN    = 15
-N_DATASETS = 60
-DEGREE     = 13         # 14 features, 15 samples → near-interpolating, high variance at small λ
+NOISE_STD  = 0.5
+N_TRAIN    = 20
+N_DATASETS = 200
+N_CENTERS  = 50    # 2.5× more basis functions than data points → underdetermined
+BANDWIDTH  = 0.25  # localised RBFs → ill-conditioned Gram matrix at small λ
 
 rng = np.random.default_rng(42)
 
 x_train     = np.linspace(0, np.pi, N_TRAIN)
 x_plot      = np.linspace(0, np.pi, 300)
 y_true_plot = f_true(x_plot)
+centers     = np.linspace(0, np.pi, N_CENTERS)
 
-# ── Design matrices ───────────────────────────────────────────────────────────────
-def poly_matrix(x, degree):
-    return np.column_stack([np.ones_like(x)] + [x ** d for d in range(1, degree + 1)])
+# ── RBF design matrices (no intercept — centres span the full domain) ─────────────
+def rbf_matrix(x, centers, bw):
+    return np.exp(-0.5 * ((x[:, None] - centers[None, :]) / bw) ** 2)
 
-X_train_raw = poly_matrix(x_train, DEGREE)
-X_plot_raw  = poly_matrix(x_plot,  DEGREE)
-
-# Standardise non-intercept columns for numerical stability
-feat_mean = X_train_raw[:, 1:].mean(axis=0)
-feat_std  = X_train_raw[:, 1:].std(axis=0) + 1e-8
-
-X_train = np.hstack([X_train_raw[:, :1],
-                     (X_train_raw[:, 1:] - feat_mean) / feat_std])
-X_plot  = np.hstack([X_plot_raw[:, :1],
-                     (X_plot_raw[:, 1:] - feat_mean) / feat_std])
+X_train = rbf_matrix(x_train, centers, BANDWIDTH)   # (N_TRAIN, N_CENTERS)
+X_plot  = rbf_matrix(x_plot,  centers, BANDWIDTH)   # (N_plot,  N_CENTERS)
 
 # ── Noisy dataset realisations ────────────────────────────────────────────────────
 y_clean    = f_true(x_train)
 Y_datasets = y_clean + rng.normal(0, NOISE_STD, (N_DATASETS, N_TRAIN))
 
 # ── Ridge helper ─────────────────────────────────────────────────────────────────
-n_feat = DEGREE + 1
+n_feat = N_CENTERS
 XtX    = X_train.T @ X_train
-I_p    = np.diag([0.0] + [1.0] * DEGREE)   # intercept column left unpenalised
+I_p    = np.eye(n_feat)   # penalise all RBF weights equally
 
 
 def ridge_preds_all(lam):
@@ -89,7 +82,7 @@ def ridge_preds_all(lam):
 
 # ── Precompute animation data ─────────────────────────────────────────────────────
 N_FRAMES     = 80
-lambdas_anim = np.logspace(-3, 2, N_FRAMES)           # 0.001 → 100
+lambdas_anim = np.logspace(-4, 2, N_FRAMES)           # 0.0001 → 100
 
 print("Precomputing predictions for animation frames...")
 all_preds = np.stack([ridge_preds_all(lam) for lam in lambdas_anim])
@@ -99,10 +92,12 @@ print("Done.")
 mean_preds = all_preds.mean(axis=1)                                  # (N_FRAMES, N_plot)
 bias2_anim = ((mean_preds - y_true_plot) ** 2).mean(axis=1)         # (N_FRAMES,)
 var_anim   = all_preds.var(axis=1).mean(axis=1)                     # (N_FRAMES,)
+band_lo    = np.percentile(all_preds, 10, axis=1)                   # (N_FRAMES, N_plot)
+band_hi    = np.percentile(all_preds, 90, axis=1)                   # (N_FRAMES, N_plot)
 
 # Dense curves for smooth right-panel backgrounds
 N_DENSE       = 300
-lambdas_dense = np.logspace(-3, 2, N_DENSE)
+lambdas_dense = np.logspace(-4, 2, N_DENSE)
 bias2_dense   = np.zeros(N_DENSE)
 var_dense     = np.zeros(N_DENSE)
 for i, lam in enumerate(lambdas_dense):
@@ -146,11 +141,9 @@ ax_left.plot(x_plot, y_true_plot,
              color=TRUTH_COL, lw=2.5, ls="--", zorder=10,
              label="Ground truth $f(x)$")
 
-fit_lines = []
-for j in range(N_DATASETS):
-    ln, = ax_left.plot(x_plot, all_preds[0, j],
-                       color="#8b949e", lw=0.7, alpha=0.20, zorder=2)
-    fit_lines.append(ln)
+band_fill = [ax_left.fill_between(x_plot, band_lo[0], band_hi[0],
+                                   color=VAR_COL, alpha=0.25, zorder=2,
+                                   label="10–90th percentile band")]
 
 mean_line, = ax_left.plot(x_plot, mean_preds[0],
                            color=MEAN_COL, lw=2.5, zorder=8,
@@ -168,7 +161,7 @@ ax_left.set_ylim(y_lo - pad, y_hi + pad)
 ax_left.set_xlabel(r"$x$", color=TEXT_COL, fontsize=12)
 ax_left.set_ylabel(r"$y$", color=TEXT_COL, fontsize=12)
 ax_left.set_title(
-    r"Ridge Fits from 60 Noise Realisations — spread = variance, offset = bias",
+    r"RBF Ridge (50 centres, 20 pts) — band width = variance, band offset = bias",
     color=TEXT_COL, fontsize=10, pad=8,
 )
 ax_left.legend(fontsize=9, facecolor=PANEL_BG, edgecolor="#30363d",
@@ -240,8 +233,9 @@ def update(frame):
     b2  = bias2_anim[frame]
     v   = var_anim[frame]
 
-    for j, ln in enumerate(fit_lines):
-        ln.set_ydata(all_preds[frame, j])
+    band_fill[0].remove()
+    band_fill[0] = ax_left.fill_between(x_plot, band_lo[frame], band_hi[frame],
+                                         color=VAR_COL, alpha=0.25, zorder=2)
     mean_line.set_ydata(mean_preds[frame])
 
     cursor_vline.set_xdata([lam, lam])
@@ -262,7 +256,7 @@ def update(frame):
 
     lambda_title.set_text(rf"$\lambda = {lam:.3f}$")
 
-    return [*fit_lines, mean_line, cursor_vline,
+    return [band_fill[0], mean_line, cursor_vline,
             bias_dot, var_dot, total_dot,
             bars[0], bars[1], bars[2],
             bias_bar_txt, var_bar_txt, tot_bar_txt, lambda_title]
