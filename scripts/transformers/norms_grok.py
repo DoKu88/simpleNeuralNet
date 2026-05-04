@@ -1,4 +1,9 @@
+import argparse
+import datetime
 import itertools
+import os
+
+from tqdm import tqdm
 
 import numpy as np
 import matplotlib as mpl
@@ -9,9 +14,25 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.widgets import RadioButtons, CheckButtons, TextBox, Button
 from matplotlib.patches import Rectangle
 
+# ====================== CLI ======================
+parser = argparse.ArgumentParser(description="3D normalization visualizer")
+parser.add_argument(
+    "--no-gif",
+    action="store_true",
+    help="Skip GIF generation and jump straight to the interactive plot.",
+)
+parser.add_argument(
+    "--num-vectors",
+    type=int,
+    default=5,
+    metavar="N",
+    help="Number of random vectors to display (default: 5).",
+)
+args = parser.parse_args()
+
 # ====================== CONFIG & DATA ======================
 np.random.seed(42)
-num_vectors = 5
+num_vectors = args.num_vectors
 dim = 3
 
 # Plot limits and max |coordinate| for unconstrained random endpoints.
@@ -563,8 +584,74 @@ def on_spin_clicked(_event):
 
 spin_btn.on_clicked(on_spin_clicked)
 
+# ====================== GIF EXPORT ======================
+def generate_gifs():
+    global current_norm, show_original
+
+    norms = ["LayerNorm", "DyT", "BatchNorm", "RMSNorm", "L1", "L2"]
+    ts = datetime.datetime.now().strftime("%m_%d_%y_%H_%M_%S")
+    out_dir = os.path.join("outputs", f"{ts}_Norm_GIFS")
+    os.makedirs(out_dir, exist_ok=True)
+
+    frames_per_rotation = round(360 / _SPIN_AZIM_STEP_DEG)
+    fps = round(1000 / _SPIN_INTERVAL_MS)
+
+    total = len(norms)
+    total_frames = frames_per_rotation * 2  # rotation 1: with orig, rotation 2: without
+
+    for done, norm in enumerate(norms, start=1):
+        # Ensure checkbox is checked (show_original=True) before each GIF.
+        if not check.get_status()[0]:
+            check.set_active(0)   # toggles to checked; callback sets show_original=True
+        # Drive norm through the radio widget so the visual and current_norm stay in sync.
+        radio.set_active(norms.index(norm))   # fires on_radio_change → sets current_norm + plot_vectors
+        ax.view_init(elev=28, azim=-50)
+
+        def make_frame(frame_idx):
+            # At the start of the second rotation, uncheck the box via the
+            # existing callback so the visual and the global stay in sync.
+            if frame_idx == frames_per_rotation:
+                check.set_active(0)   # toggles to unchecked; callback sets show_original=False
+            ax.view_init(
+                elev=28,
+                azim=-50 - (frame_idx % frames_per_rotation) * _SPIN_AZIM_STEP_DEG,
+            )
+            return []
+
+        anim = mplanimation.FuncAnimation(
+            fig,
+            make_frame,
+            frames=total_frames,
+            interval=_SPIN_INTERVAL_MS,
+            blit=False,
+            cache_frame_data=False,
+        )
+
+        path = os.path.join(out_dir, f"{norm}.gif")
+        print(f"[{done}/{total}] Generating {path} ...", flush=True)
+        with tqdm(total=total_frames, unit="frame", leave=False) as frame_pbar:
+            anim.save(
+                path,
+                writer="pillow",
+                fps=fps,
+                progress_callback=lambda i, n: frame_pbar.update(1),
+            )
+        print(f"       saved → {path}", flush=True)
+
+
 # ====================== INITIAL PLOT ======================
 plot_vectors()
 ax.view_init(elev=28, azim=-50)
+
+if not args.no_gif:
+    generate_gifs()
+    # Restore default state: show_original global was left False by the last GIF
+    # iteration; the checkbox widget visual is still checked=True (we never
+    # touched it during generation), so setting show_original=True re-syncs them.
+    current_norm = "LayerNorm"
+    check.set_active(0)   # checkbox is unchecked after last GIF; toggle back to checked
+    radio.set_active(0)   # fires on_radio_change → sets current_norm + plot_vectors
+    ax.view_init(elev=28, azim=-50)
+    print("All GIFs saved to outputs/. Interactive plot is now active.", flush=True)
 
 plt.show()
