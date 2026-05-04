@@ -1,12 +1,12 @@
 """
 lasso_kkt_conditions.py
 
-KKT subgradient conditions visualised directly on the 2-D L1 diamond.
+KKT conditions on the 3-D L1 ball — an octahedron polytope.
 
-Each edge of the diamond is a region of (w1, w2) space with both weights
-nonzero — the residual correlations r_i = x_i^T(y-Xw) are pinned to ±λ.
-The four corners are the sparse solutions where one weight = 0 and the
-corresponding correlation is free inside [-λ, λ] (Case 3).
+Boundary hierarchy:
+  8 Faces   — all 3 weights nonzero  → every r_i pinned to ±λ
+  12 Edges  — exactly 1 weight = 0   → that r_i free in [-λ, λ]  (Case 3 × 1)
+  6 Vertices — exactly 2 weights = 0 → those r_i free in [-λ, λ] (Case 3 × 2, most sparse)
 """
 
 from datetime import datetime
@@ -15,6 +15,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
+from matplotlib.lines import Line2D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 REPO_ROOT  = Path(__file__).resolve().parent.parent
@@ -23,92 +25,151 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 stamp = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
 
 # ── Palette ───────────────────────────────────────────────────────────────────
-BG        = "#0e1117"
-BLUE      = "#2563eb"
-BLUE_LITE = "#93c5fd"
-C_NE      = "#00d4aa"   # w1>0, w2>0
-C_NW      = "#c084fc"   # w1<0, w2>0
-C_SW      = "#ff6b6b"   # w1<0, w2<0
-C_SE      = "#fb923c"   # w1>0, w2<0
-C_CORNER  = "#ffdd57"   # sparse corners
+BG       = "#0e1117"
+C_FACE   = "#2563eb"   # uniform blue for all faces
+C_CORNER = "#ffdd57"   # vertices: 2 weights = 0 (most sparse)
 
-T   = 1.5   # λ
-LIM = 2.8
+T = 1.0  # λ
+
+# ── Octahedron geometry ───────────────────────────────────────────────────────
+verts = np.array([
+    [ T,  0,  0],   # 0  +x  (w1 > 0)
+    [-T,  0,  0],   # 1  -x  (w1 < 0)
+    [ 0,  T,  0],   # 2  +y  (w2 > 0)
+    [ 0, -T,  0],   # 3  -y  (w2 < 0)
+    [ 0,  0,  T],   # 4  +z  (w3 > 0)
+    [ 0,  0, -T],   # 5  -z  (w3 < 0)
+])
+
+# (vertex indices for each triangular face)
+face_defs = [
+    [0, 2, 4],   # (+,+,+)
+    [1, 2, 4],   # (-,+,+)
+    [0, 3, 4],   # (+,-,+)
+    [0, 2, 5],   # (+,+,-)
+    [1, 3, 4],   # (-,-,+)
+    [1, 2, 5],   # (-,+,-)
+    [0, 3, 5],   # (+,-,-)
+    [1, 3, 5],   # (-,-,-)
+]
 
 # ── Figure ────────────────────────────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(8, 9), facecolor=BG)
+fig = plt.figure(figsize=(11, 9), facecolor=BG)
+ax  = fig.add_subplot(111, projection="3d")
 ax.set_facecolor(BG)
-for sp in ax.spines.values():
-    sp.set_edgecolor("#3a3a3a")
-ax.tick_params(colors="white", labelsize=10)
 
-# ── Diamond fill ──────────────────────────────────────────────────────────────
-verts = np.array([[T, 0], [0, T], [-T, 0], [0, -T]])
-ax.add_patch(plt.Polygon(verts, closed=True,
-                         facecolor=BLUE, alpha=0.25, edgecolor="none", zorder=2))
+# ── Faces ─────────────────────────────────────────────────────────────────────
+triangles = [verts[idx] for idx in face_defs]
 
-# ── 4 coloured edges ──────────────────────────────────────────────────────────
-lw = 5
-# NE: w1>0, w2>0
-ax.plot([T, 0], [0, T],   color=C_NE, lw=lw, zorder=5, solid_capstyle="round")
-# NW: w1<0, w2>0
-ax.plot([0, -T], [T, 0],  color=C_NW, lw=lw, zorder=5, solid_capstyle="round")
-# SW: w1<0, w2<0
-ax.plot([-T, 0], [0, -T], color=C_SW, lw=lw, zorder=5, solid_capstyle="round")
-# SE: w1>0, w2<0
-ax.plot([0, T], [-T, 0],  color=C_SE, lw=lw, zorder=5, solid_capstyle="round")
+poly = Poly3DCollection(triangles, alpha=0.40, shade=False)
+poly.set_facecolor(C_FACE)
+poly.set_edgecolor("#dddddd")
+poly.set_linewidth(0.5)
+ax.add_collection3d(poly)
 
-# ── Axes ─────────────────────────────────────────────────────────────────────
-ax.axhline(0, color="#3a3a3a", lw=0.8, zorder=1)
-ax.axvline(0, color="#3a3a3a", lw=0.8, zorder=1)
-
-# ── Interior label ────────────────────────────────────────────────────────────
-ax.text(0, 0, "$w = 0$\n$r_1,r_2\\in[-\\lambda,\\lambda]$",
-        color="#c8c8ff", fontsize=8.5, ha="center", va="center",
-        bbox=dict(boxstyle="round,pad=0.3", facecolor="#1e1e3a", edgecolor="#7777aa", alpha=0.92))
-
-# ── Sparse corners — boxes placed outside diamond along outward axis ───────────
-#  (cx, cy) = corner dot,  (tx, ty) = text anchor,  ha/va = text alignment
-corners = [
-    ( T,  0, "$w_2=0$\n$r_1{=}+\\lambda$\n$r_2\\in[-\\lambda,\\lambda]$",  T+0.10,       0,   "left",   "center"),
-    (-T,  0, "$w_2=0$\n$r_1{=}-\\lambda$\n$r_2\\in[-\\lambda,\\lambda]$", -T-0.10,       0,   "right",  "center"),
-    ( 0,  T, "$w_1=0$\n$r_2{=}+\\lambda$\n$r_1\\in[-\\lambda,\\lambda]$",       0,  T+0.10,  "center",  "bottom"),
-    ( 0, -T, "$w_1=0$\n$r_2{=}-\\lambda$\n$r_1\\in[-\\lambda,\\lambda]$",       0, -T-0.10,  "center",  "top"),
+# ── Edges — drawn and labelled with segment notation (e.g. AC) ───────────────
+edge_defs = [
+    (0,2,"AC"),(0,3,"AD"),(0,4,"AE"),(0,5,"AF"),
+    (1,2,"BC"),(1,3,"BD"),(1,4,"BE"),(1,5,"BF"),
+    (2,4,"CE"),(2,5,"CF"),(3,4,"DE"),(3,5,"DF"),
 ]
-for (cx, cy, lbl, tx, ty, ha, va) in corners:
-    ax.scatter(cx, cy, color=C_CORNER, s=130, zorder=8,
-               edgecolors="white", linewidths=1.2)
-    ax.annotate(lbl,
-                xy=(cx, cy), xytext=(tx, ty),
-                xycoords="data", textcoords="data",
-                color=C_CORNER, fontsize=8.2, ha=ha, va=va,
-                arrowprops=dict(arrowstyle="-", color=C_CORNER, lw=1.0),
-                bbox=dict(boxstyle="round,pad=0.3", facecolor=BG,
-                          edgecolor=C_CORNER, alpha=0.9))
+for (i, j, name) in edge_defs:
+    p1, p2 = verts[i], verts[j]
+    ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
+            color="white", alpha=0.55, lw=1.2)
 
-# ── Styling ───────────────────────────────────────────────────────────────────
-ax.set_xlim(-LIM, LIM)
-ax.set_ylim(-LIM, LIM)
-ax.set_aspect("equal")
-ax.set_xlabel("$w_1$", color="white", fontsize=14)
-ax.set_ylabel("$w_2$", color="white", fontsize=14, rotation=0, labelpad=16)
-ax.set_title("Conditions on the L1 Circle\n"
-             r"$r_i \equiv x_i^T(y - Xw^*)$ — the residual correlation for feature $i$",
-             color="white", fontsize=12, fontweight="bold", pad=12)
+# ── Vertices ──────────────────────────────────────────────────────────────────
+ax.scatter(verts[:,0], verts[:,1], verts[:,2],
+           color=C_CORNER, s=80, zorder=10,
+           edgecolors="white", linewidths=1.0, depthshade=False)
 
-# ── Legend ────────────────────────────────────────────────────────────────────
-patches = [
-    mpatches.Patch(color=C_NE,     label=r"$w_1>0,\;w_2>0$ — Case 2 for both"),
-    mpatches.Patch(color=C_NW,     label=r"$w_1<0,\;w_2>0$ — Case 1 & 2"),
-    mpatches.Patch(color=C_SW,     label=r"$w_1<0,\;w_2<0$ — Case 1 for both"),
-    mpatches.Patch(color=C_SE,     label=r"$w_1>0,\;w_2<0$ — Case 2 & 1"),
-    mpatches.Patch(color=C_CORNER, label=r"Corner: one weight $=0$ → Case 3 (sparse)"),
+# ── Vertex letter labels (A–F, placed outside each corner) ───────────────────
+O = 1.32   # offset factor
+vertex_letters = [
+    (0, "A"),   # +x
+    (1, "B"),   # -x
+    (2, "C"),   # +y
+    (3, "D"),   # -y
+    (4, "E"),   # +z
+    (5, "F"),   # -z
 ]
-ax.legend(handles=patches, loc="lower center", bbox_to_anchor=(0.5, -0.21),
-          ncol=2, facecolor="#161b27", edgecolor="#2a2a4a",
-          labelcolor="white", fontsize=8.8,
-          title="Edge colour = which KKT case holds at that point on the boundary",
-          title_fontsize=8.5)
+for (vi, letter) in vertex_letters:
+    lx, ly, lz = verts[vi] * O
+    ax.text(lx, ly, lz, letter,
+            color=C_CORNER, fontsize=13, fontweight="bold",
+            ha="center", va="center")
+
+# ── Axis style ────────────────────────────────────────────────────────────────
+ax.set_xlabel("$w_1$", color="white", fontsize=12, labelpad=6)
+ax.set_ylabel("$w_2$", color="white", fontsize=12, labelpad=6)
+ax.set_zlabel("$w_3$", color="white", fontsize=12, labelpad=6)
+ax.tick_params(colors="white", labelsize=8)
+# 3D axes don't fully respect tick_params — set each axis explicitly
+for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+    axis.label.set_color("white")
+    for t in axis.get_ticklabels():
+        t.set_color("white")
+
+for pane in (ax.xaxis.pane, ax.yaxis.pane, ax.zaxis.pane):
+    pane.fill = False
+    pane.set_edgecolor("#2a2a4a")
+ax.grid(True)
+ax.xaxis._axinfo["grid"].update(color="#2a2a4a", linewidth=0.6)
+ax.yaxis._axinfo["grid"].update(color="#2a2a4a", linewidth=0.6)
+ax.zaxis._axinfo["grid"].update(color="#2a2a4a", linewidth=0.6)
+ax.view_init(elev=22, azim=32)
+
+# ── Title ─────────────────────────────────────────────────────────────────────
+ax.set_title(
+    "Conditions on the L1 Ball — 3D Polytope (Octahedron)\n"
+    r"$r_i \equiv x_i^T(y - Xw^*)$  |  sparsity increases: Faces → Edges → Vertices",
+    color="white", fontsize=12, fontweight="bold", pad=14)
+
+# ── Legend: two side-by-side boxes ───────────────────────────────────────────
+leg_kw = dict(facecolor="#161b27", edgecolor="#2a2a4a",
+              labelcolor="white", fontsize=8.8)
+dot = dict(marker="o", color="none", markerfacecolor=C_CORNER,
+           markeredgecolor="white", markersize=7)
+eln = dict(color="#aaaadd", lw=1.5)
+
+vertex_handles = [
+    mpatches.Patch(color=C_FACE, alpha=0.6,
+        label=r"Face: all $w_i\!\neq\!0$, $r_i=\pm\lambda$"),
+    Line2D([0],[0], **dot, label=r"A  ($w_1>0$):  $w_2=w_3=0$"),
+    Line2D([0],[0], **dot, label=r"B  ($w_1<0$):  $w_2=w_3=0$"),
+    Line2D([0],[0], **dot, label=r"C  ($w_2>0$):  $w_1=w_3=0$"),
+    Line2D([0],[0], **dot, label=r"D  ($w_2<0$):  $w_1=w_3=0$"),
+    Line2D([0],[0], **dot, label=r"E  ($w_3>0$):  $w_1=w_2=0$"),
+    Line2D([0],[0], **dot, label=r"F  ($w_3<0$):  $w_1=w_2=0$"),
+]
+edge_handles = [
+    Line2D([0],[0], **eln, label=r"AC  ($w_3=0$)"),
+    Line2D([0],[0], **eln, label=r"AD  ($w_3=0$)"),
+    Line2D([0],[0], **eln, label=r"AE  ($w_2=0$)"),
+    Line2D([0],[0], **eln, label=r"AF  ($w_2=0$)"),
+    Line2D([0],[0], **eln, label=r"BC  ($w_3=0$)"),
+    Line2D([0],[0], **eln, label=r"BD  ($w_3=0$)"),
+    Line2D([0],[0], **eln, label=r"BE  ($w_2=0$)"),
+    Line2D([0],[0], **eln, label=r"BF  ($w_2=0$)"),
+    Line2D([0],[0], **eln, label=r"CE  ($w_1=0$)"),
+    Line2D([0],[0], **eln, label=r"CF  ($w_1=0$)"),
+    Line2D([0],[0], **eln, label=r"DE  ($w_1=0$)"),
+    Line2D([0],[0], **eln, label=r"DF  ($w_1=0$)"),
+]
+
+leg1 = fig.legend(handles=vertex_handles,
+                  title="Vertices", title_fontsize=9,
+                  loc="lower left", bbox_to_anchor=(0.01, 0.01),
+                  ncol=1, **leg_kw)
+leg1.get_title().set_color("white")
+fig.add_artist(leg1)
+
+leg2 = fig.legend(handles=edge_handles,
+                  title=r"Edges  (1 weight $=0$ → that $r_i\in[-\lambda,\lambda]$)",
+                  title_fontsize=9,
+                  loc="lower right", bbox_to_anchor=(0.99, 0.01),
+                  ncol=2, **leg_kw)
+leg2.get_title().set_color("white")
 
 plt.tight_layout()
 out = OUTPUT_DIR / f"{stamp}_lasso_kkt_conditions.png"
