@@ -1,9 +1,12 @@
+import itertools
+
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.animation as mplanimation
 from matplotlib import cm as mpl_cm
 from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.widgets import RadioButtons, CheckButtons, TextBox, Slider, Button
+from matplotlib.widgets import RadioButtons, CheckButtons, TextBox, Button
 from matplotlib.patches import Rectangle
 
 # ====================== CONFIG & DATA ======================
@@ -11,7 +14,32 @@ np.random.seed(42)
 num_vectors = 5
 dim = 3
 
-vectors = np.random.randn(num_vectors, dim) * 2.5
+# Plot limits and max |coordinate| for unconstrained random endpoints.
+AXIS_LIM = 2.0
+
+# Sidebar / plot typography: match RadioButtons label size (rc "font.size", usually 10).
+UI_FS = float(mpl.rcParams["font.size"])
+VECTORS_TITLE_FS = UI_FS + 3
+
+def sample_vectors(n, norm_type=None):
+    return np.random.uniform(-AXIS_LIM, AXIS_LIM, (n, dim))
+
+
+def constraint_indicator_flags():
+    """Read-only (surface, inside) for *normalized* outputs under current_norm."""
+    if current_norm in ("L2", "RMSNorm", "L1"):
+        return True, False
+    if current_norm == "LayerNorm":
+        return True, False
+    if current_norm == "DyT":
+        return False, True
+    if current_norm == "BatchNorm":
+        return False, False
+    return False, False
+
+
+current_norm = "LayerNorm"
+vectors = sample_vectors(num_vectors)
 
 BASE_COLORS = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2"]
 
@@ -27,11 +55,6 @@ def palette(n):
 
 
 colors = palette(num_vectors)
-
-# Legend: max rows visible; scroll when num_vectors exceeds this
-LEGEND_MAX_ROWS = 6
-legend_scroll = 0
-scroll_slider = None
 
 # ====================== NORMALIZATION FUNCTIONS ======================
 def apply_norm(X, norm_type, eps=1e-5):
@@ -49,6 +72,20 @@ def apply_norm(X, norm_type, eps=1e-5):
         alpha = 1.0
         return np.tanh(alpha * X)
 
+    elif norm_type == "RMSNorm":
+        # Per row: scale by RMS of features (no mean subtraction), like RMSNorm in transformers
+        rms = np.sqrt(np.mean(X**2, axis=1, keepdims=True) + eps)
+        return X / rms
+
+    elif norm_type == "L1":
+        d = np.sum(np.abs(X), axis=1, keepdims=True) + eps
+        return X / d
+
+    elif norm_type == "L2":
+        # Per row: divide by Euclidean norm (points lie on the unit sphere)
+        d = np.linalg.norm(X, axis=1, keepdims=True, ord=2) + eps
+        return X / d
+
     return X
 
 
@@ -57,21 +94,176 @@ fig = plt.figure(figsize=(13, 8))
 ax = fig.add_subplot(111, projection="3d")
 
 # Left column: narrow legend on top, widgets stacked below (no overlap).
-_left_col_w = 0.23
+_left_col_w = 0.26
 _left_col_x = 0.02
 plt.subplots_adjust(left=_left_col_x + _left_col_w + 0.04, right=0.95, bottom=0.08, top=0.92)
 
-ax.set_xlim(-6, 6)
-ax.set_ylim(-6, 6)
-ax.set_zlim(-6, 6)
-ax.set_xlabel("X")
-ax.set_ylabel("Y")
-ax.set_zlabel("Z")
-ax.set_title("3D Vectors + Normalization Effects")
+ax.set_xlim(-AXIS_LIM, AXIS_LIM)
+ax.set_ylim(-AXIS_LIM, AXIS_LIM)
+ax.set_zlim(-AXIS_LIM, AXIS_LIM)
+ax.set_xlabel("X", fontsize=UI_FS)
+ax.set_ylabel("Y", fontsize=UI_FS)
+ax.set_zlabel("Z", fontsize=UI_FS)
+ax.set_title("3D Vectors + Normalization", fontsize=UI_FS)
+ax.tick_params(axis="both", labelsize=UI_FS)
 
 # Store artists
 norm_lines = []
 orig_lines = []
+constraint_artists = []
+
+# Sapphire blue wireframes: where normalized outputs lie (per norm)
+SAPPHIRE = "#0f4c99"
+
+# Bordered panels (legend + normalized-output indicators)
+_PANEL_FACE = "#f8f8f8"
+_PANEL_EDGE = "#666666"
+_PANEL_LW = 1.0
+
+
+def _clear_constraint_shape():
+    for a in constraint_artists:
+        try:
+            a.remove()
+        except (AttributeError, ValueError):
+            pass
+    constraint_artists.clear()
+
+
+def _sphere_wireframe(radius, color, alpha, lw):
+    phi = np.linspace(0, 2 * np.pi, 40)
+    for t in np.linspace(0.12, np.pi - 0.12, 8):
+        x = radius * np.sin(t) * np.cos(phi)
+        y = radius * np.sin(t) * np.sin(phi)
+        z = radius * np.cos(t) * np.ones_like(phi)
+        (ln,) = ax.plot(x, y, z, color=color, alpha=alpha, linewidth=lw)
+        constraint_artists.append(ln)
+    thetas = np.linspace(0, np.pi, 24)
+    for p in phi[::5]:
+        x = radius * np.sin(thetas) * np.cos(p)
+        y = radius * np.sin(thetas) * np.sin(p)
+        z = radius * np.cos(thetas)
+        (ln,) = ax.plot(x, y, z, color=color, alpha=alpha, linewidth=lw)
+        constraint_artists.append(ln)
+
+
+def _octahedron_wireframe(color, alpha, lw):
+    V = np.array(
+        [
+            [1.0, 0, 0],
+            [-1.0, 0, 0],
+            [0, 1.0, 0],
+            [0, -1.0, 0],
+            [0, 0, 1.0],
+            [0, 0, -1.0],
+        ]
+    )
+    for i in range(6):
+        for j in range(i + 1, 6):
+            if np.sum(np.abs(V[i] - V[j])) != 2.0:
+                continue
+            if np.dot(V[i], V[j]) != 0.0:
+                continue
+            (ln,) = ax.plot(
+                [V[i, 0], V[j, 0]],
+                [V[i, 1], V[j, 1]],
+                [V[i, 2], V[j, 2]],
+                color=color,
+                alpha=alpha,
+                linewidth=lw,
+            )
+            constraint_artists.append(ln)
+
+
+def _cube_wireframe(half, color, alpha, lw):
+    V = np.array(list(itertools.product([-half, half], repeat=3)), dtype=float)
+    for i in range(8):
+        for j in range(i + 1, 8):
+            diff = V[i] - V[j]
+            if np.count_nonzero(np.abs(diff) > 1e-9) != 1:
+                continue
+            (ln,) = ax.plot(
+                [V[i, 0], V[j, 0]],
+                [V[i, 1], V[j, 1]],
+                [V[i, 2], V[j, 2]],
+                color=color,
+                alpha=alpha,
+                linewidth=lw,
+            )
+            constraint_artists.append(ln)
+
+
+def draw_constraint_shape():
+    _clear_constraint_shape()
+    if current_norm == "BatchNorm":
+        return
+
+    alpha, lw = 0.42, 1.0
+    c = SAPPHIRE
+
+    if current_norm == "L2":
+        _sphere_wireframe(1.0, c, alpha, lw)
+    elif current_norm == "RMSNorm":
+        _sphere_wireframe(np.sqrt(3.0), c, alpha, lw)
+    elif current_norm == "LayerNorm":
+        r = np.sqrt(3.0)
+        th = np.linspace(0, 2 * np.pi, 160)
+        u = np.array([1.0, -1.0, 0.0]) / np.sqrt(2.0)
+        v = np.array([1.0, 1.0, -2.0]) / np.sqrt(6.0)
+        pts = r * (np.cos(th)[:, None] * u + np.sin(th)[:, None] * v)
+        (ln,) = ax.plot(pts[:, 0], pts[:, 1], pts[:, 2], color=c, alpha=alpha + 0.08, linewidth=lw + 0.2)
+        constraint_artists.append(ln)
+    elif current_norm == "L1":
+        _octahedron_wireframe(c, alpha, lw)
+    elif current_norm == "DyT":
+        _cube_wireframe(1.0, c, alpha, lw)
+
+
+def constraint_legend_patch_and_caption():
+    """(facecolor, math_text) for the side legend."""
+    if current_norm == "L2":
+        return SAPPHIRE, r"$L_2$: $\|\mathbf{v}\|_2 = 1$"
+    if current_norm == "RMSNorm":
+        return (
+            SAPPHIRE,
+            r"$\mathrm{RMS}$: $\frac{1}{d}\sum_i v_i^2 = 1$"
+            "\n"
+            r"$\Rightarrow \|\mathbf{v}\|_2 = \sqrt{d}$"
+            + f"\n($d={dim}$)",
+        )
+    if current_norm == "LayerNorm":
+        return (
+            SAPPHIRE,
+            r"$\mathrm{LN}$: $\sum_i v_i = 0,\ "
+            r"\mathrm{Var}_{\mathrm{pop}}(\mathbf{v})=1$"
+            "\n"
+            r"$\Rightarrow \|\mathbf{v}\|_2 = \sqrt{d}$"
+            + f"\n($d={dim}$)",
+        )
+    if current_norm == "L1":
+        return SAPPHIRE, r"$L_1$: $\sum_i |v_i| = 1$"
+    if current_norm == "DyT":
+        return SAPPHIRE, r"$\mathrm{DyT}$: $y_i=\tanh(x_i)$" "\n" r"$y_i \in (-1,1)$"
+    if current_norm == "BatchNorm":
+        return "#b0b0b0", "Batch norm\n(affine; no fixed\ncompact surface)"
+    return "#b0b0b0", ""
+
+
+def _norm_output_locus_note():
+    """Where normalized outputs live for the selected norm."""
+    if current_norm == "L2":
+        return "Normalized: on the sphere surface."
+    if current_norm == "RMSNorm":
+        return "Normalized: on the sphere surface."
+    if current_norm == "LayerNorm":
+        return "Normalized: on a circle (1D curve in R³)."
+    if current_norm == "L1":
+        return "Normalized: on the octahedron surface."
+    if current_norm == "DyT":
+        return "DyT outputs: strictly inside (-1,1)³ (interior)."
+    if current_norm == "BatchNorm":
+        return "BatchNorm: no fixed surface in this demo."
+    return ""
 
 
 def plot_vectors():
@@ -108,121 +300,161 @@ def plot_vectors():
             )
             orig_lines.append(line)
 
+    draw_constraint_shape()
+    update_legend()
+    draw_constraint_indicators()
     fig.canvas.draw_idle()
 
 
 # ====================== LEGEND (top of left column) ======================
-_legend_bottom, _legend_h = 0.50, 0.32
+_legend_bottom, _legend_h = 0.61, 0.29
 legend_ax = fig.add_axes([_left_col_x, _legend_bottom, _left_col_w, _legend_h])
 legend_ax.axis("off")
-legend_ax.set_title(
-    "Vector legend (color + coords)", fontsize=9, pad=6, loc="left"
+
+_indicator_bottom, _indicator_h = 0.495, 0.105
+indicator_ax = fig.add_axes(
+    [_left_col_x, _indicator_bottom, _left_col_w, _indicator_h],
 )
+indicator_ax.axis("off")
 
-_scroll_bottom, _scroll_h = 0.465, 0.028
-scroll_ax = fig.add_axes([_left_col_x, _scroll_bottom, _left_col_w, _scroll_h])
 
-_row = 0.105
-_sw = 0.065
-_sh = 0.065
+def draw_constraint_indicators():
+    indicator_ax.clear()
+    indicator_ax.axis("off")
+    indicator_ax.add_patch(
+        Rectangle(
+            (0.012, 0.02),
+            0.976,
+            0.93,
+            transform=indicator_ax.transAxes,
+            facecolor=_PANEL_FACE,
+            edgecolor=_PANEL_EDGE,
+            linewidth=_PANEL_LW,
+            zorder=0,
+        )
+    )
+    surface_on, inside_on = constraint_indicator_flags()
+    chk, empty = "\u2611", "\u2610"
+    indicator_ax.text(
+        0.02,
+        0.70,
+        f"{chk if surface_on else empty}  Vectors Required to be on Volume Surface",
+        transform=indicator_ax.transAxes,
+        fontsize=UI_FS,
+        va="center",
+        color="#111",
+        zorder=2,
+    )
+    indicator_ax.text(
+        0.02,
+        0.32,
+        f"{chk if inside_on else empty}  Vectors Required to be Inside Volume",
+        transform=indicator_ax.transAxes,
+        fontsize=UI_FS,
+        va="center",
+        color="#111",
+        zorder=2,
+    )
 
 
 def update_legend():
     legend_ax.clear()
     legend_ax.axis("off")
-    legend_ax.set_title(
-        "Vector legend (color + coords)", fontsize=9, pad=6, loc="left"
-    )
-
-    first = legend_scroll
-    last = min(num_vectors, first + LEGEND_MAX_ROWS)
-    for j, i in enumerate(range(first, last)):
-        y = 0.90 - j * _row
-        rect = Rectangle(
-            (0.02, y - 0.5 * _sh),
-            _sw,
-            _sh,
-            facecolor=colors[i],
-            edgecolor="black",
-            linewidth=0.6,
+    legend_ax.add_patch(
+        Rectangle(
+            (0.012, 0.015),
+            0.976,
+            0.97,
             transform=legend_ax.transAxes,
+            facecolor=_PANEL_FACE,
+            edgecolor=_PANEL_EDGE,
+            linewidth=_PANEL_LW,
+            zorder=0,
         )
-        legend_ax.add_artist(rect)
-
-        coords = f"v{i+1}: ({vectors[i,0]:.2f}, {vectors[i,1]:.2f}, {vectors[i,2]:.2f})"
-        legend_ax.text(
-            0.11,
-            y,
-            coords,
-            va="center",
-            fontsize=7,
-            fontfamily="monospace",
-        )
-
-    if num_vectors > LEGEND_MAX_ROWS:
-        legend_ax.text(
-            0.02,
-            0.04,
-            f"Rows {first + 1}–{last} of {num_vectors} · use slider below",
-            fontsize=6.5,
-            style="italic",
-            color="gray",
-        )
-    else:
-        legend_ax.text(
-            0.02,
-            0.04,
-            "Solid = normalized · Dashed = original",
-            fontsize=7,
-            style="italic",
-            color="gray",
-        )
-
-
-def _on_scroll_change(val):
-    global legend_scroll
-    legend_scroll = int(round(val))
-    update_legend()
-    fig.canvas.draw_idle()
-
-
-def setup_legend_scroll_slider():
-    global scroll_slider, legend_scroll
-    max_scroll = max(0, num_vectors - LEGEND_MAX_ROWS)
-    legend_scroll = min(legend_scroll, max_scroll)
-
-    scroll_ax.clear()
-    if max_scroll == 0:
-        scroll_slider = None
-        scroll_ax.set_visible(False)
-        scroll_ax.axis("off")
-        return
-
-    scroll_ax.set_visible(True)
-    # Empty widget label — Slider draws it to the left of a thin axes and it clips
-    scroll_slider = Slider(
-        scroll_ax,
-        "",
-        0,
-        max_scroll,
-        valinit=legend_scroll,
-        valstep=1,
-        valfmt="%d",
     )
-    scroll_ax.set_title("Scroll", fontsize=8, pad=2, loc="left")
-    scroll_slider.on_changed(_on_scroll_change)
+    legend_ax.set_title(
+        "Output constraint",
+        fontsize=VECTORS_TITLE_FS,
+        fontweight="600",
+        pad=6,
+        loc="left",
+    )
+
+    fc, math_cap = constraint_legend_patch_and_caption()
+    if math_cap:
+        sq = 0.22
+        legend_ax.add_patch(
+            Rectangle(
+                (0.05, 0.58),
+                sq,
+                sq,
+                transform=legend_ax.transAxes,
+                facecolor=fc,
+                edgecolor="black",
+                linewidth=1.0,
+                zorder=2,
+            )
+        )
+        legend_ax.text(
+            0.31,
+            0.69,
+            math_cap,
+            transform=legend_ax.transAxes,
+            fontsize=UI_FS,
+            va="center",
+            linespacing=1.45,
+            zorder=3,
+        )
+
+    loc = _norm_output_locus_note()
+    if loc:
+        legend_ax.text(
+            0.05,
+            0.46,
+            loc,
+            transform=legend_ax.transAxes,
+            fontsize=UI_FS,
+            linespacing=1.35,
+            color="#222",
+            zorder=2,
+        )
+    legend_ax.text(
+        0.05,
+        0.30,
+        "Raw vectors: uniform in the plot cube.",
+        transform=legend_ax.transAxes,
+        fontsize=UI_FS,
+        linespacing=1.3,
+        color="#333",
+        zorder=2,
+    )
+
+    legend_ax.text(
+        0.05,
+        0.14,
+        "Solid = normalized · Dashed = original",
+        transform=legend_ax.transAxes,
+        fontsize=UI_FS,
+        color="#000000",
+        zorder=2,
+    )
 
 
 # ====================== WIDGETS (below legend) ======================
-current_norm = "LayerNorm"
 show_original = True
 
-_radio_bottom, _radio_h = 0.21, 0.22
-_check_bottom, _check_h = 0.09, 0.10
-_nvec_bottom, _nvec_h = 0.02, 0.055
+_radio_bottom, _radio_h = 0.282, 0.208
+_check_bottom, _check_h = 0.195, 0.08
+_nvec_bottom, _nvec_h = 0.055, 0.085
 
 radio_ax = fig.add_axes([_left_col_x, _radio_bottom, _left_col_w, _radio_h])
-radio = RadioButtons(radio_ax, ["LayerNorm", "DyT", "BatchNorm"], active=0)
+radio = RadioButtons(
+    radio_ax,
+    ["LayerNorm", "DyT", "BatchNorm", "RMSNorm", "L1", "L2"],
+    active=0,
+)
+for _lbl in radio.labels:
+    _lbl.set_fontsize(UI_FS)
 
 
 def on_radio_change(label):
@@ -235,6 +467,8 @@ radio.on_clicked(on_radio_change)
 
 check_ax = fig.add_axes([_left_col_x, _check_bottom, _left_col_w, _check_h])
 check = CheckButtons(check_ax, ["Show Original Vectors"], [True])
+for _lbl in check.labels:
+    _lbl.set_fontsize(UI_FS)
 
 
 def on_check_change(label):
@@ -247,31 +481,33 @@ check.on_clicked(on_check_change)
 
 nvec_ax = fig.add_axes([_left_col_x, _nvec_bottom, _left_col_w, _nvec_h])
 text_box = TextBox(nvec_ax, "", initial=str(num_vectors))
-nvec_ax.set_title("Vectors", fontsize=8, pad=2, loc="left")
+if hasattr(text_box, "text_disp"):
+    text_box.text_disp.set_fontsize(UI_FS)
+nvec_ax.set_title(
+    "Vectors", fontsize=VECTORS_TITLE_FS, pad=6, loc="left", fontweight="600"
+)
 
 NVEC_MIN, NVEC_MAX = 1, 60
 
 
 def resize_vectors(n):
-    global num_vectors, vectors, colors, legend_scroll
+    global num_vectors, vectors, colors
     n = int(n)
     n = max(NVEC_MIN, min(n, NVEC_MAX))
     old_n = num_vectors
     if n == old_n:
         return n
     if n > old_n:
-        extra = np.random.randn(n - old_n, dim) * 2.5
+        extra = sample_vectors(n - old_n)
         vectors = np.vstack([vectors, extra])
     else:
         vectors = vectors[:n].copy()
     num_vectors = n
     colors = palette(n)
-    legend_scroll = min(legend_scroll, max(0, n - LEGEND_MAX_ROWS))
     return n
 
 
 def on_nvec_submit(text):
-    global legend_scroll
     try:
         raw = int(float(str(text).strip()))
     except (TypeError, ValueError):
@@ -279,16 +515,11 @@ def on_nvec_submit(text):
         return
     n = resize_vectors(raw)
     text_box.set_val(str(n))
-    setup_legend_scroll_slider()
-    update_legend()
     plot_vectors()
     fig.canvas.draw_idle()
 
 
 text_box.on_submit(on_nvec_submit)
-
-setup_legend_scroll_slider()
-update_legend()
 
 # ====================== SPIN (rotate view about z through origin) ======================
 # Clockwise around +z as seen from above: step azimuth downward each frame.
@@ -299,6 +530,7 @@ _SPIN_INTERVAL_MS = 35
 
 spin_ax = fig.add_axes([0.86, 0.035, 0.09, 0.045])
 spin_btn = Button(spin_ax, "Spin")
+spin_btn.label.set_fontsize(UI_FS)
 
 
 def _spin_frame(_frame):
@@ -313,6 +545,7 @@ def on_spin_clicked(_event):
     global _spin_active, _spin_anim
     _spin_active = not _spin_active
     spin_btn.label.set_text("Stop" if _spin_active else "Spin")
+    spin_btn.label.set_fontsize(UI_FS)
     if _spin_active:
         if _spin_anim is None:
             _spin_anim = mplanimation.FuncAnimation(
