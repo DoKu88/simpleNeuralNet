@@ -178,8 +178,6 @@ def build_traces():
     return traces
 
 def build_layout():
-    norm = state["norm"]
-    caption = CONSTRAINT_CAPTIONS.get(norm, "")
     return {
         "scene": {
             "xaxis": {"range": [-AXIS_LIM, AXIS_LIM], "title": "X"},
@@ -187,16 +185,8 @@ def build_layout():
             "zaxis": {"range": [-AXIS_LIM, AXIS_LIM], "title": "Z"},
             "aspectmode": "cube",
         },
-        "title": {
-            "text": (
-                f"{norm}  —  drag to spin, scroll to zoom"
-                f"<br><sup>{caption}  ·  solid = normalized, dashed = original</sup>"
-            ),
-            "font": {"size": 13},
-            "x": 0.5,
-        },
-        "height": 500,
-        "margin": {"l": 0, "r": 0, "t": 70, "b": 0},
+        "height": 460,
+        "margin": {"l": 0, "r": 0, "t": 10, "b": 0},
         "showlegend": False,
         "paper_bgcolor": "white",
     }
@@ -204,8 +194,8 @@ def build_layout():
 # ── DOM setup ──────────────────────────────────────────────────────────────────
 output = document.getElementById("pyscript-output")
 output.innerHTML = """
-<div id="norm-wrap" style="font-family:sans-serif;font-size:13px;">
-  <div id="norm-controls" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 2px 6px;">
+<div id="norm-wrap" style="font-family:sans-serif;font-size:13px;overflow:hidden;">
+  <div id="norm-controls" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 2px 4px;">
     <strong style="margin-right:2px;">Norm:</strong>
     <button class="nb active-nb" data-norm="LayerNorm">LayerNorm</button>
     <button class="nb" data-norm="DyT">DyT</button>
@@ -222,6 +212,9 @@ output.innerHTML = """
       <input type="number" id="nvec" value="5" min="1" max="60"
              style="width:48px;padding:2px 4px;border:1px solid #aaa;border-radius:3px;">
     </span>
+  </div>
+  <div id="norm-caption" style="padding:2px 4px 4px;font-size:12px;color:#555;">
+    &nbsp;
   </div>
   <div id="norm-plot"></div>
 </div>
@@ -241,6 +234,11 @@ _initialized = False
 
 def render():
     global _initialized
+    norm = state["norm"]
+    caption = CONSTRAINT_CAPTIONS.get(norm, "")
+    document.getElementById("norm-caption").textContent = (
+        f"{norm}  ·  {caption}  ·  solid = normalized, dashed = original  ·  drag to spin, scroll to zoom"
+    )
     traces = build_traces()
     layout = build_layout()
     if not _initialized:
