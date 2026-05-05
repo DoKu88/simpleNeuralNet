@@ -28,6 +28,13 @@ parser.add_argument(
     metavar="N",
     help="Number of random vectors to display (default: 5).",
 )
+parser.add_argument(
+    "--gif-step",
+    type=int,
+    default=2,
+    metavar="N",
+    help="Save every Nth frame to the GIF (default: 2 = every other frame).",
+)
 args = parser.parse_args()
 
 # ====================== CONFIG & DATA ======================
@@ -598,6 +605,8 @@ def generate_gifs():
 
     total = len(norms)
     total_frames = frames_per_rotation * 2  # rotation 1: with orig, rotation 2: without
+    gif_step = args.gif_step
+    gif_fps = round(fps / gif_step)
 
     for done, norm in enumerate(norms, start=1):
         # Ensure checkbox is checked (show_original=True) before each GIF.
@@ -607,10 +616,12 @@ def generate_gifs():
         radio.set_active(norms.index(norm))   # fires on_radio_change → sets current_norm + plot_vectors
         ax.view_init(elev=28, azim=-50)
 
+        # Flag reset per norm so the halfway switch fires exactly once per GIF.
+        switched = [False]
+
         def make_frame(frame_idx):
-            # At the start of the second rotation, uncheck the box via the
-            # existing callback so the visual and the global stay in sync.
-            if frame_idx == frames_per_rotation:
+            if frame_idx >= frames_per_rotation and not switched[0]:
+                switched[0] = True
                 check.set_active(0)   # toggles to unchecked; callback sets show_original=False
             ax.view_init(
                 elev=28,
@@ -618,10 +629,11 @@ def generate_gifs():
             )
             return []
 
+        gif_frames = range(0, total_frames, gif_step)
         anim = mplanimation.FuncAnimation(
             fig,
             make_frame,
-            frames=total_frames,
+            frames=gif_frames,
             interval=_SPIN_INTERVAL_MS,
             blit=False,
             cache_frame_data=False,
@@ -629,11 +641,11 @@ def generate_gifs():
 
         path = os.path.join(out_dir, f"{norm}.gif")
         print(f"[{done}/{total}] Generating {path} ...", flush=True)
-        with tqdm(total=total_frames, unit="frame", leave=False) as frame_pbar:
+        with tqdm(total=len(gif_frames), unit="frame", leave=False) as frame_pbar:
             anim.save(
                 path,
                 writer="pillow",
-                fps=fps,
+                fps=gif_fps,
                 progress_callback=lambda i, n: frame_pbar.update(1),
             )
         print(f"       saved → {path}", flush=True)
