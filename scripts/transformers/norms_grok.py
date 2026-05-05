@@ -223,11 +223,16 @@ def _cube_wireframe(half, color, alpha, lw):
 
 def draw_constraint_shape():
     _clear_constraint_shape()
-    if current_norm == "BatchNorm":
-        return
-
     alpha, lw = 0.42, 1.0
     c = SAPPHIRE
+
+    if current_norm == "BatchNorm":
+        # No hard compact surface: the true per-element bound is sqrt(B-1),
+        # which grows with batch size and is extremely loose for random inputs.
+        # By CLT (large B), each feature independently approaches N(0,1), so
+        # we draw the ±2σ cube as an asymptotic approximation (~95% per feature).
+        _cube_wireframe(1.0, c, alpha, lw)
+        return
 
     if current_norm == "L2":
         _sphere_wireframe(1.0, c, alpha, lw)
@@ -273,7 +278,12 @@ def constraint_legend_patch_and_caption():
     if current_norm == "DyT":
         return SAPPHIRE, r"$\mathrm{DyT}$: $y_i=\tanh(x_i)$" "\n" r"$y_i \in (-1,1)$"
     if current_norm == "BatchNorm":
-        return "#b0b0b0", "Batch norm\n(affine; no fixed\ncompact surface)"
+        return (
+            SAPPHIRE,
+            r"$\mathrm{BN}$: by CLT (large $B$)," "\n"
+            r"each feature $\approx\mathcal{N}(0,1)$" "\n"
+            r"Cube $= \pm 1\sigma$ per feature",
+        )
     return "#b0b0b0", ""
 
 
@@ -290,7 +300,7 @@ def _norm_output_locus_note():
     if current_norm == "DyT":
         return "DyT outputs: strictly inside (-1,1)³ (interior)."
     if current_norm == "BatchNorm":
-        return "BatchNorm: no fixed surface in this demo."
+        return r"(approx.; hard bound $\sqrt{B-1}$ is loose)"
     return ""
 
 
